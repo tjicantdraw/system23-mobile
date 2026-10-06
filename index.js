@@ -36,6 +36,11 @@
 
   var patches = [];
   var failures = [];
+  var runtimeErrors = {};
+  function noteError(where, e) {
+    var msg = where + ": " + (e && e.message ? e.message : String(e));
+    runtimeErrors[msg] = (runtimeErrors[msg] || 0) + 1;
+  }
   var hidden = new Set();
   var candidates = new Set();
   var decided = new WeakMap();
@@ -77,6 +82,10 @@
 
   function monoProps(props) {
     if (!storage.monoFont || !props) return props;
+    try { return monoPropsInner(props); } catch (e) { noteError("font", e); return props; }
+  }
+
+  function monoPropsInner(props) {
     var flat = StyleSheet.flatten(props.style) || {};
     var fam = String(flat.fontFamily || "");
     var w = flat.fontWeight;
@@ -93,28 +102,46 @@
     return out;
   }
 
-  // Wraps jsx / jsxs / createElement: drop hidden components, restyle Text.
+  // Hidden components are swapped for this empty placeholder instead of being removed,
+  // because some Discord code (e.g. the server list) crashes if an element is missing.
+  function Hidden() { return null; }
+  Hidden.displayName = "System24Hidden";
+
+  // Wraps jsx / jsxs / createElement: blank out hidden components, restyle Text.
   function elementHook(args, orig) {
-    var type = args[0];
-    if (shouldHide(type)) return null;
-    if (type === Text && args[1]) {
-      args = Array.prototype.slice.call(args);
-      args[1] = monoProps(args[1]);
+    try {
+      var type = args[0];
+      if (shouldHide(type)) {
+        args = Array.prototype.slice.call(args);
+        var p = args[1] || {};
+        args[0] = Hidden;
+        args[1] = p.key != null ? { key: p.key } : {};
+      } else if (type === Text && args[1]) {
+        args = Array.prototype.slice.call(args);
+        args[1] = monoProps(args[1]);
+      }
+    } catch (e) {
+      noteError("element", e);
     }
     return orig.apply(this, args);
   }
 
+  // Returns a boxier copy of a style (never mutates Discord's objects).
   function boxify(s) {
-    if (!s || typeof s !== "object" || Array.isArray(s)) return;
+    if (!s || typeof s !== "object" || Array.isArray(s)) return s;
     var r = s.borderRadius;
     var isCircle = s.width != null && s.width === s.height;
     if (typeof r === "number" && r >= 4 && r <= 32 && s.backgroundColor && !isCircle) {
-      s.borderRadius = 3;
+      var out = {};
+      for (var k in s) out[k] = s[k];
+      out.borderRadius = 3;
       if (s.borderWidth == null) {
-        s.borderWidth = 1;
-        s.borderColor = BORDER;
+        out.borderWidth = 1;
+        out.borderColor = BORDER;
       }
+      return out;
     }
+    return s;
   }
 
   function isQuestUrl(a) {
@@ -150,9 +177,15 @@
 
     tryPatch("StyleSheet.create", function () {
       return patcher.before("create", StyleSheet, function (args) {
-        if (!storage.boxy || !args[0]) return;
-        var obj = args[0];
-        for (var key in obj) boxify(obj[key]);
+        if (!storage.boxy || !args[0] || typeof args[0] !== "object") return;
+        try {
+          var src = args[0];
+          var copy = {};
+          for (var key in src) copy[key] = boxify(src[key]);
+          args[0] = copy;
+        } catch (e) {
+          noteError("boxy", e);
+        }
       });
     });
 
@@ -238,7 +271,8 @@
 
     var hiddenList = Array.from(hidden).sort();
     var candList = Array.from(candidates).sort();
-    var report = "system24 mobile debug\n\nIssues: " + (failures.join(" | ") || "none") +
+    var errList = Object.keys(runtimeErrors).map(function (m) { return m + " (x" + runtimeErrors[m] + ")"; });
+    var report = "system24 mobile v2 debug\n\nIssues: " + (failures.concat(errList).join(" | ") || "none") +
       "\n\nHidden: " + (hiddenList.join(", ") || "none") +
       "\n\nNot hidden but looks related: " + (candList.join(", ") || "none");
 
@@ -256,7 +290,7 @@
         input("extraPatterns", "Extra component names to hide (regex)", "e.g. SomePromo|OtherBanner", function () { compileExtra(); resetCache(); })
       ),
       e(FormSection, { title: "Debug" },
-        row("issues", "Patch issues (" + failures.length + ")", failures.join("\n") || "None", null),
+        row("issues", "Patch issues (" + (failures.length + errList.length) + ")", failures.concat(errList).join("\n") || "None", null),
         row("hidden", "Hidden so far (" + hiddenList.length + ")", hiddenList.slice(0, 40).join(", ") || "Nothing yet. Browse around Discord, then come back.", null),
         row("cand", "Related but NOT hidden (" + candList.length + ")", candList.slice(0, 60).join(", ") || "None seen yet", null),
         row("copy", "Copy debug report", "Paste this to whoever is fixing the plugin.", function () { copy(report); })
