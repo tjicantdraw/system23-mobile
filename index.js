@@ -11,19 +11,41 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
+  var VERSION = 3;
+  // v3 "scout" defaults: hiding OFF (it crashed screens in v1/v2) while we learn Discord's real component names.
   var DEFAULTS = {
     monoFont: true,
     fontFamily: "monospace",
     letterSpacing: "-0.3",
-    boxy: true,
-    hideQuests: true,
-    hideUpsells: true,
+    boxy: false,
+    hideQuests: false,
+    hideUpsells: false,
     blockQuestRequests: true,
     extraPatterns: ""
   };
+  if (storage.__version !== VERSION) {
+    Object.keys(DEFAULTS).forEach(function (k) { storage[k] = DEFAULTS[k]; });
+    storage.__version = VERSION;
+  }
   Object.keys(DEFAULTS).forEach(function (k) {
     if (storage[k] === undefined) storage[k] = DEFAULTS[k];
   });
+
+  // ---- scouting: what does Discord actually render? ----
+  var seenNames = {};      // component name -> count
+  var seenCount = 0;
+  var textHosts = {};      // components that receive a Discord text "variant" prop
+  var rnTextHits = 0;      // times React Native's own Text was created
+  var VARIANT_RE = /^(text|heading|eyebrow|display|redesign)[-\/]/;
+  function scout(type, props) {
+    var n = nameOf(type) || (typeof type === "string" ? "<" + type + ">" : "");
+    if (!n) return;
+    if (seenNames[n] !== undefined) seenNames[n]++;
+    else if (seenCount < 3000) { seenNames[n] = 1; seenCount++; }
+    if (props && typeof props.variant === "string" && VARIANT_RE.test(props.variant)) {
+      textHosts[n] = (textHosts[n] || 0) + 1;
+    }
+  }
 
   // system24 colors
   var BORDER = "#303030"; // --bg-1
@@ -69,7 +91,9 @@
     var v = decided.get(type);
     if (v !== undefined) return v;
     var n = nameOf(type);
-    v = !!n && (
+    // Never hide wrappers: providers/containers/screens hold other UI and crash it when removed.
+    var isWrapper = /Provider|Context|Container|Wrapper|Screen|Navigator|Boundary|Store|Manager|Root$/.test(n);
+    v = !!n && !isWrapper && (
       (storage.hideQuests && QUEST_RE.test(n)) ||
       (storage.hideUpsells && UPSELL_RE.test(n)) ||
       (extraRe !== null && extraRe.test(n))
@@ -90,7 +114,8 @@
     var fam = String(flat.fontFamily || "");
     var w = flat.fontWeight;
     // Discord on Android encodes weight in the family name (e.g. "ggsans-Semibold").
-    var bold = /bold|semibold|black|heavy/i.test(fam) || w === "bold" || Number(w) >= 600;
+    var variant = typeof props.variant === "string" ? props.variant : "";
+    var bold = /bold|semibold|black|heavy/i.test(fam) || /bold|semibold|black|heavy/.test(variant) || w === "bold" || Number(w) >= 600;
     var extra = {
       fontFamily: storage.fontFamily || "monospace",
       fontWeight: bold ? "bold" : "normal",
@@ -111,14 +136,18 @@
   function elementHook(args, orig) {
     try {
       var type = args[0];
+      var props0 = args[1];
+      scout(type, props0);
+      if (type === Text) rnTextHits++;
       if (shouldHide(type)) {
         args = Array.prototype.slice.call(args);
         var p = args[1] || {};
         args[0] = Hidden;
         args[1] = p.key != null ? { key: p.key } : {};
-      } else if (type === Text && args[1]) {
+      } else if (props0 && (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant)))) {
+        // RN's Text, or Discord's own Text component (identified by its "variant" prop).
         args = Array.prototype.slice.call(args);
-        args[1] = monoProps(args[1]);
+        args[1] = monoProps(props0);
       }
     } catch (e) {
       noteError("element", e);
@@ -214,7 +243,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v3 loaded");
     } catch (e) {}
   }
 
@@ -272,7 +301,16 @@
     var hiddenList = Array.from(hidden).sort();
     var candList = Array.from(candidates).sort();
     var errList = Object.keys(runtimeErrors).map(function (m) { return m + " (x" + runtimeErrors[m] + ")"; });
-    var report = "system24 mobile v2 debug\n\nIssues: " + (failures.concat(errList).join(" | ") || "none") +
+    var top = Object.keys(seenNames).sort(function (a, b) { return seenNames[b] - seenNames[a]; });
+    var related = top.filter(function (n) { return CANDIDATE_RE.test(n); });
+    var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
+    var report = "system24 mobile v3 debug" +
+      "\n\nRN Text created: " + rnTextHits +
+      "\nText components (variant prop): " + (textList.join(", ") || "none") +
+      "\nComponents seen: " + seenCount +
+      "\n\nRelated names seen: " + (related.slice(0, 150).join(", ") || "none") +
+      "\n\nMost common: " + top.slice(0, 80).join(", ") +
+      "\n\n---" + "\n\nIssues: " + (failures.concat(errList).join(" | ") || "none") +
       "\n\nHidden: " + (hiddenList.join(", ") || "none") +
       "\n\nNot hidden but looks related: " + (candList.join(", ") || "none");
 
@@ -293,6 +331,7 @@
         row("issues", "Patch issues (" + (failures.length + errList.length) + ")", failures.concat(errList).join("\n") || "None", null),
         row("hidden", "Hidden so far (" + hiddenList.length + ")", hiddenList.slice(0, 40).join(", ") || "Nothing yet. Browse around Discord, then come back.", null),
         row("cand", "Related but NOT hidden (" + candList.length + ")", candList.slice(0, 60).join(", ") || "None seen yet", null),
+        row("scout", "Scout: text components found", (textList.join(", ") || "none yet") + "  |  RN Text: " + rnTextHits, null),
         row("copy", "Copy debug report", "Paste this to whoever is fixing the plugin.", function () { copy(report); })
       )
     );
