@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 10;
+  var VERSION = 11;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -237,12 +237,25 @@
     return out;
   }
 
+  function isAnimatedValue(v) {
+    return v !== null && typeof v === "object" && (
+      typeof v.__getValue === "function" || v._isReanimatedSharedValue || v.__reanimatedHostObjectRef ||
+      typeof v.addListener === "function" || v._animation !== undefined);
+  }
+
   function isPlainStyle(o) {
-    // leave Animated / Reanimated style objects alone: copying them breaks animations
+    // Only skip real Animated / Reanimated styles (copying those breaks animations).
+    // Native color objects and other static objects are fine to copy by reference.
     if (o.viewDescriptors || o.viewsRef || o.initial) return false;
     for (var k in o) {
       var v = o[k];
-      if (v !== null && typeof v === "object" && k !== "transform" && k !== "shadowOffset") return false;
+      if (typeof v === "function" || isAnimatedValue(v)) return false;
+      if (k === "transform" && Array.isArray(v)) {
+        for (var t = 0; t < v.length; t++) {
+          var tv = v[t];
+          for (var tk in tv) if (isAnimatedValue(tv[tk])) return false;
+        }
+      }
     }
     return true;
   }
@@ -465,7 +478,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v10 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v11 loaded");
     } catch (e) {}
   }
 
@@ -528,7 +541,7 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v10 debug" +
+    var report = "system24 mobile v11 debug" +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
