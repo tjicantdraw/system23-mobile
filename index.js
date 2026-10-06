@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 9;
+  var VERSION = 10;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -23,7 +23,7 @@
     hideUpsells: true,
     blockQuestRequests: true,
     recolor: true,
-    recolorText: true,
+    recolorText: false,
     extraPatterns: ""
   };
   if (storage.__version !== VERSION) {
@@ -202,7 +202,8 @@
     "channel-icon": "#808080", "interactive-normal": "#808080", "interactive-muted": "#484848"
   };
   function remapToken(c) {
-    if (!storage.recolorText) return c;
+    // Disabled: Discord's native text only understands its own color names; a hex value renders black.
+    return c;
     if (TOKEN_MAP[c]) return TOKEN_MAP[c];
     if (/(^|-)brand(-|$)/.test(c) && /text|icon|link/.test(c)) return "#b589d6";
     return c;
@@ -464,7 +465,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v9 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v10 loaded");
     } catch (e) {}
   }
 
@@ -527,7 +528,7 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v9 debug" +
+    var report = "system24 mobile v10 debug" +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
@@ -546,7 +547,6 @@
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
         sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
-        sw("recolorText", "system24 text colors", "Also recolor Discord's named text colors. Turn off if text looks wrong."),
         sw("boxy", "Boxy panels", "Square corners and thin borders on cards and buttons.")
       ),
       e(FormSection, { title: "Hide" },
