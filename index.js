@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 4;
+  var VERSION = 5;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -56,7 +56,16 @@
   var QUEST_RE = /(^|[^a-z])Quest(?!ion)/;
   var UPSELL_RE = /Upsell|NitroPromo|PremiumPromo|GiftButton|PremiumGift|ShopEntry|ShopUpsell|ShopBanner|CollectiblesShop|CollectiblesUpsell|ShopThisLook|MarketingCoachmark|^ChatInputActionButtonGift$/;
   // Things that look related but weren't hidden — shown in the debug list so we can add them.
-  var CANDIDATE_RE = /quest|nitro|premium|upsell|shop|gift|collectible|promo|boost/i;
+  var CANDIDATE_RE = /quest|nitro|premium|upsell|shop|gift|collectible|promo|boost|orb|wishlist/i;
+  // Buttons/rows recognised by their visible label (e.g. the "Quests" button on the You tab).
+  var QUEST_LABEL_RE = /^(quests?|orbs|orbs balance)$/i;
+  var UPSELL_LABEL_RE = /^(shop|get nitro|nitro|send a gift|gift nitro)$/i;
+  var labelHits = {};
+  function labelOf(props) {
+    if (!props) return "";
+    var l = props.accessibilityLabel || props.label || props.title || props.text;
+    return typeof l === "string" ? l.trim() : "";
+  }
 
   var patches = [];
   var failures = [];
@@ -94,7 +103,7 @@
     if (v !== undefined) return v;
     var n = nameOf(type);
     // Never hide wrappers: providers/containers/screens hold other UI and crash it when removed.
-    var isWrapper = /Provider|Context|Container|Wrapper|Screen|Navigator|Boundary|Store|Manager|Root$/.test(n);
+    var isWrapper = /(Provider|Context|Container|Wrapper|Screen|Navigator|Boundary|Store|Manager|Root)(Inner)?$/.test(n);
     v = !!n && !isWrapper && (
       (storage.hideQuests && QUEST_RE.test(n)) ||
       (storage.hideUpsells && UPSELL_RE.test(n)) ||
@@ -141,7 +150,17 @@
       var props0 = args[1];
       scout(type, props0);
       if (type === Text) rnTextHits++;
-      if (shouldHide(type)) {
+      var lbl = labelOf(props0);
+      if (lbl && CANDIDATE_RE.test(lbl)) {
+        var key = (nameOf(type) || String(type)) + "[" + lbl + "]";
+        labelHits[key] = (labelHits[key] || 0) + 1;
+      }
+      var hideByLabel = !!lbl && !/(Provider|Context|Container|Screen|Navigator)(Inner)?$/.test(nameOf(type)) && (
+        (storage.hideQuests && QUEST_LABEL_RE.test(lbl)) ||
+        (storage.hideUpsells && UPSELL_LABEL_RE.test(lbl))
+      );
+      if (hideByLabel) hidden.add((nameOf(type) || "?") + "[" + lbl + "]");
+      if (hideByLabel || shouldHide(type)) {
         args = Array.prototype.slice.call(args);
         var p = args[1] || {};
         args[0] = Hidden;
@@ -259,7 +278,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v4 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v5 loaded");
     } catch (e) {}
   }
 
@@ -320,7 +339,9 @@
     var top = Object.keys(seenNames).sort(function (a, b) { return seenNames[b] - seenNames[a]; });
     var related = top.filter(function (n) { return CANDIDATE_RE.test(n); });
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
-    var report = "system24 mobile v4 debug" +
+    var labelList = Object.keys(labelHits);
+    var report = "system24 mobile v5 debug" +
+      "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
       "\n\nRN Text created: " + rnTextHits +
       "\nText components (variant prop): " + (textList.join(", ") || "none") +
