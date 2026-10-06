@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 13;
+  var VERSION = 14;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -145,13 +145,59 @@
   }
 
 
+
+  // ------------------------------------------------------------------ exemptions
+  // Some things should keep Discord's look: profile pictures stay round, server tags get no outline.
+  // We find out what's being drawn by asking React which component is rendering right now
+  // and walking up its parents.
+  var AVATAR_RE = /Avatar/;
+  var TAG_RE = /GuildTag|ClanTag|GuildBadge|PrimaryGuild/;
+  var ownerTracking = "off";
+  var RI = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+  var CI = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+  function currentOwner() {
+    try {
+      if (RI && RI.ReactCurrentOwner) return RI.ReactCurrentOwner.current;
+      if (CI && CI.A && typeof CI.A.getOwner === "function") return CI.A.getOwner();
+    } catch (e) {}
+    return null;
+  }
+  function kindOf(name) {
+    if (!name) return null;
+    if (AVATAR_RE.test(name)) return "avatar";
+    if (TAG_RE.test(name)) return "tag";
+    return null;
+  }
+  var ownerKind = new WeakMap();
+  function exemptKind(type) {
+    var k = kindOf(nameOf(type));
+    if (k) return k;
+    var f = currentOwner();
+    if (!f) return null;
+    ownerTracking = "on";
+    var hit = ownerKind.get(f);
+    if (hit !== undefined) return hit;
+    var start = f, depth = 0;
+    k = null;
+    while (f && depth < 12) {
+      k = kindOf(nameOf(f.type));
+      if (k) break;
+      f = f.return;
+      depth++;
+    }
+    ownerKind.set(start, k);
+    return k;
+  }
+
   // ------------------------------------------------------------------ recolor + boxy
   // Discord's new design system ignores Kettu themes, so colors are remapped as styles render:
   // tinted greys -> system24 neutral greys, Discord blurple -> system24 purple. Others untouched.
   var COLOR_KEYS = ["backgroundColor", "color", "borderColor", "borderTopColor", "borderBottomColor",
     "borderLeftColor", "borderRightColor", "tintColor", "textDecorationColor"];
   var colorCache = new Map();
-  var styleCache = new WeakMap();
+  function clearStyleCaches() {
+    modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap() };
+  }
   var colorSeen = {};
   var colorSeenCount = 0;
 
@@ -262,9 +308,14 @@
     return true;
   }
 
-  function remapObject(o) {
-    var cached = styleCache.get(o);
-    if (cached) return cached;
+  // mode: "full" | "noOutline" (server tags) | "colorOnly" (avatars)
+  var modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap() };
+  function remapObject(o, mode, ctx) {
+    mode = mode || "full";
+    // only cache when the result can't depend on sibling styles
+    var cacheable = !ctx;
+    var cache = modeCaches[mode];
+    if (cacheable) { var cached = cache.get(o); if (cached) return cached; }
     var out = o;
     if (isPlainStyle(o)) {
       var copy = null;
@@ -277,10 +328,11 @@
           }
         }
       }
-      if (storage.boxy) {
+      if (storage.boxy && mode !== "colorOnly") {
         var src = copy || o;
-        var w = typeof src.width === "number" ? src.width : null;
-        var h = typeof src.height === "number" ? src.height : null;
+        // width/height often live in a different entry of the same style array
+        var w = typeof src.width === "number" ? src.width : (ctx ? ctx.w : null);
+        var h = typeof src.height === "number" ? src.height : (ctx ? ctx.h : null);
         var half = (w != null && h != null) ? Math.min(w, h) / 2 : null;
         var RADII = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius",
           "borderBottomRightRadius", "borderTopStartRadius", "borderTopEndRadius", "borderBottomStartRadius", "borderBottomEndRadius"];
@@ -295,7 +347,7 @@
           copy[rk] = BOX_RADIUS;
           squared = true;
         }
-        if (storage.outlines) {
+        if (storage.outlines && mode === "full") {
           var oc = String(storage.outlineColor || "#484848");
           var ow = Number(storage.outlineWidth) || 1.5;
           var hasBg = src.backgroundColor && src.backgroundColor !== "transparent";
@@ -329,20 +381,36 @@
           }
         }
       }
+      if (mode === "noOutline") {
+        // server tags: no border at all
+        var src2 = copy || o;
+        if (typeof src2.borderWidth === "number" && src2.borderWidth > 0) {
+          if (!copy) { copy = {}; for (var k7 in o) copy[k7] = o[k7]; }
+          copy.borderWidth = 0;
+        }
+      }
       if (copy) out = copy;
     }
-    styleCache.set(o, out);
+    if (cacheable) cache.set(o, out);
     return out;
   }
 
-  function remapStyle(st, depth) {
+  function sizeOf(st, out, depth) {
+    if (!st || typeof st !== "object" || depth > 6) return;
+    if (Array.isArray(st)) { for (var i = 0; i < st.length; i++) sizeOf(st[i], out, depth + 1); return; }
+    if (typeof st.width === "number") out.w = st.width;
+    if (typeof st.height === "number") out.h = st.height;
+  }
+
+  function remapStyle(st, depth, mode, ctx) {
     if (!st || typeof st !== "object" || depth > 6) return st;
     if (Array.isArray(st)) {
+      if (!ctx) { ctx = { w: null, h: null }; sizeOf(st, ctx, 0); if (ctx.w == null && ctx.h == null) ctx = null; }
       var changed = false, arr = new Array(st.length);
-      for (var i = 0; i < st.length; i++) { arr[i] = remapStyle(st[i], depth + 1); if (arr[i] !== st[i]) changed = true; }
+      for (var i = 0; i < st.length; i++) { arr[i] = remapStyle(st[i], depth + 1, mode, ctx); if (arr[i] !== st[i]) changed = true; }
       return changed ? arr : st;
     }
-    return remapObject(st);
+    return remapObject(st, mode, ctx);
   }
 
   var ICON_RE = /Clip|GuildIcon|GuildsBar|Folder|Squircle|Mask/;
@@ -359,14 +427,15 @@
     iconProps[name] = parts.slice(0, 25).join(" ");
   }
 
-  function styleProps(props, type) {
+  function styleProps(props, type, mode) {
+    mode = mode || "full";
     if (!(storage.recolor || storage.boxy) || !props) return props;
     try {
       var out = null;
       var tname = nameOf(type) || (typeof type === "string" ? type : "");
       if (tname && ICON_RE.test(tname)) {
         scoutIconProps(tname, props);
-        if (storage.boxy) {
+        if (storage.boxy && mode !== "colorOnly") {
           for (var pk in props) {
             var pv = props[pk];
             if (/radius/i.test(pk) && typeof pv === "number" && pv > BOX_RADIUS && pv < 100) {
@@ -377,7 +446,7 @@
         }
       }
       if (props.style) {
-        var ns = remapStyle(props.style, 0);
+        var ns = remapStyle(props.style, 0, mode, null);
         if (ns !== props.style) { if (!out) { out = {}; for (var k in props) out[k] = props[k]; } out.style = ns; }
       }
       if (storage.recolor) {
@@ -422,7 +491,8 @@
       } else if (props0) {
         var np = props0;
         if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
-        np = styleProps(np, type);
+        var kind = (storage.boxy || storage.outlines) ? exemptKind(type) : null;
+        np = styleProps(np, type, kind === "avatar" ? "colorOnly" : kind === "tag" ? "noOutline" : "full");
         if (np !== props0) {
           args = Array.prototype.slice.call(args);
           args[1] = np;
@@ -536,7 +606,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v13 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v14 loaded");
     } catch (e) {}
   }
 
@@ -568,7 +638,7 @@
       }
       return e(FormSwitchRow, {
         key: key, label: label, subLabel: sub, value: !!storage[key],
-        onValueChange: function (v) { storage[key] = v; resetCache(); styleCache = new WeakMap(); refresh(); }
+        onValueChange: function (v) { storage[key] = v; resetCache(); clearStyleCaches(); refresh(); }
       });
     }
 
@@ -600,7 +670,8 @@
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
-    var report = "system24 mobile v13 debug" +
+    var report = "system24 mobile v14 debug" +
+      "\n\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
@@ -622,8 +693,8 @@
         sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
         sw("boxy", "Boxy panels", "Square corners on cards, inputs, buttons and images."),
         sw("outlines", "Outlines", "system24-style outlines on boxes, and matching divider lines."),
-        input("outlineColor", "Outline color", "#484848", function () { styleCache = new WeakMap(); }),
-        input("outlineWidth", "Outline thickness", "1.5", function () { styleCache = new WeakMap(); })
+        input("outlineColor", "Outline color", "#484848", function () { clearStyleCaches(); }),
+        input("outlineWidth", "Outline thickness", "1.5", function () { clearStyleCaches(); })
       ),
       e(FormSection, { title: "Hide" },
         sw("hideQuests", "Hide Quests", "Removes quest banners, cards and popups."),
