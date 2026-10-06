@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 8;
+  var VERSION = 9;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -53,6 +53,7 @@
 
   // system24 colors
   var BORDER = "#303030"; // --bg-1
+  var BOX_RADIUS = 2;     // system24 corners are nearly square
 
   // Component names. "Quest" is case-sensitive so "Request…" never matches.
   var QUEST_RE = /(^|[^a-z])Quest(?!ion)|^OrbsBalance/;
@@ -262,12 +263,25 @@
       }
       if (storage.boxy) {
         var src = copy || o;
-        var r = src.borderRadius;
-        var isCircle = src.width != null && src.width === src.height;
-        if (typeof r === "number" && r >= 6 && r <= 32 && src.backgroundColor && !isCircle) {
+        var w = typeof src.width === "number" ? src.width : null;
+        var h = typeof src.height === "number" ? src.height : null;
+        var half = (w != null && h != null) ? Math.min(w, h) / 2 : null;
+        var RADII = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius",
+          "borderBottomRightRadius", "borderTopStartRadius", "borderTopEndRadius", "borderBottomStartRadius", "borderBottomEndRadius"];
+        var squared = false;
+        for (var ri = 0; ri < RADII.length; ri++) {
+          var rk = RADII[ri], rv = src[rk];
+          if (typeof rv !== "number" || rv <= BOX_RADIUS) continue;
+          // keep true circles round (avatars, status dots): radius at least half the size, or a "999" style radius
+          if (half != null && rv >= half - 1 && w === h) continue;
+          if (rv >= 100) continue;
           if (!copy) { copy = {}; for (var k2 in o) copy[k2] = o[k2]; }
-          copy.borderRadius = 4;
-          if (copy.borderWidth == null) { copy.borderWidth = 1; copy.borderColor = BORDER; }
+          copy[rk] = BOX_RADIUS;
+          squared = true;
+        }
+        if (squared && src.backgroundColor && src.borderWidth == null && src.backgroundColor !== "transparent") {
+          copy.borderWidth = 1;
+          copy.borderColor = BORDER;
         }
       }
       if (copy) out = copy;
@@ -450,7 +464,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v8 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v9 loaded");
     } catch (e) {}
   }
 
@@ -513,7 +527,7 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v8 debug" +
+    var report = "system24 mobile v9 debug" +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
