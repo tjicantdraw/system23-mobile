@@ -3,6 +3,6 @@
   "description": "system24-style look for Discord mobile: monospace font, boxy panels, and no Quests / Nitro / Shop upsells.",
   "authors": [{ "name": "system24 mobile", "id": "0" }],
   "main": "index.js",
-  "hash": "463368690a4cec98400c7bb435b871a172c6378570fe7b0f2112969ba2b0e7f7",
+  "hash": "050e847a1056aab478c34d8f0547b0cc1f54fd7c32a375c0e0b1fa13a4078544",
   "vendetta": { "icon": "ic_palette" }
 }

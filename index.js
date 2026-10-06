@@ -11,15 +11,16 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 3;
-  // v3 "scout" defaults: hiding OFF (it crashed screens in v1/v2) while we learn Discord's real component names.
+  var VERSION = 4;
+  // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
+  // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
-    monoFont: true,
+    monoFont: false,
     fontFamily: "monospace",
     letterSpacing: "-0.3",
     boxy: false,
-    hideQuests: false,
-    hideUpsells: false,
+    hideQuests: true,
+    hideUpsells: true,
     blockQuestRequests: true,
     extraPatterns: ""
   };
@@ -35,7 +36,8 @@
   var seenNames = {};      // component name -> count
   var seenCount = 0;
   var textHosts = {};      // components that receive a Discord text "variant" prop
-  var rnTextHits = 0;      // times React Native's own Text was created
+  var rnTextHits = 0;
+  var jsxRuntimeCount = 0;      // times React Native's own Text was created
   var VARIANT_RE = /^(text|heading|eyebrow|display|redesign)[-\/]/;
   function scout(type, props) {
     var n = nameOf(type) || (typeof type === "string" ? "<" + type + ">" : "");
@@ -52,7 +54,7 @@
 
   // Component names. "Quest" is case-sensitive so "Request…" never matches.
   var QUEST_RE = /(^|[^a-z])Quest(?!ion)/;
-  var UPSELL_RE = /Upsell|NitroPromo|PremiumPromo|GiftButton|PremiumGift|ShopEntry|ShopUpsell|ShopBanner|CollectiblesShop|CollectiblesUpsell/;
+  var UPSELL_RE = /Upsell|NitroPromo|PremiumPromo|GiftButton|PremiumGift|ShopEntry|ShopUpsell|ShopBanner|CollectiblesShop|CollectiblesUpsell|ShopThisLook|MarketingCoachmark|^ChatInputActionButtonGift$/;
   // Things that look related but weren't hidden — shown in the debug list so we can add them.
   var CANDIDATE_RE = /quest|nitro|premium|upsell|shop|gift|collectible|promo|boost/i;
 
@@ -192,12 +194,26 @@
     compileExtra();
 
     tryPatch("jsx-runtime", function () {
-      var rt = metro.findByProps("jsx", "jsxs");
-      if (!rt) throw new Error("jsx runtime not found");
-      return [
-        patcher.instead("jsx", rt, elementHook),
-        patcher.instead("jsxs", rt, elementHook)
-      ];
+      // Discord may ship more than one copy of the JSX runtime; patch every one we can find.
+      var runtimes = [];
+      if (typeof metro.findByPropsAll === "function") runtimes = metro.findByPropsAll("jsx", "jsxs") || [];
+      if (!runtimes.length) { var one = metro.findByProps("jsx", "jsxs"); if (one) runtimes = [one]; }
+      if (!runtimes.length) throw new Error("jsx runtime not found");
+      jsxRuntimeCount = runtimes.length;
+      var uns = [];
+      runtimes.forEach(function (rt) {
+        if (typeof rt.jsx === "function") uns.push(patcher.instead("jsx", rt, elementHook));
+        if (typeof rt.jsxs === "function") uns.push(patcher.instead("jsxs", rt, elementHook));
+      });
+      return uns;
+    });
+
+    tryPatch("Text.render", function () {
+      // Catches Text even when it's created outside the patched JSX runtime.
+      if (!Text || typeof Text.render !== "function") return null; // not a forwardRef in this RN version; JSX hook covers it
+      return patcher.before("render", Text, function (args) {
+        if (storage.monoFont && args[0]) args[0] = monoProps(args[0]);
+      });
     });
 
     tryPatch("createElement", function () {
@@ -243,7 +259,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v3 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v4 loaded");
     } catch (e) {}
   }
 
@@ -304,7 +320,8 @@
     var top = Object.keys(seenNames).sort(function (a, b) { return seenNames[b] - seenNames[a]; });
     var related = top.filter(function (n) { return CANDIDATE_RE.test(n); });
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
-    var report = "system24 mobile v3 debug" +
+    var report = "system24 mobile v4 debug" +
+      "\n\nJSX runtimes patched: " + jsxRuntimeCount +
       "\n\nRN Text created: " + rnTextHits +
       "\nText components (variant prop): " + (textList.join(", ") || "none") +
       "\nComponents seen: " + seenCount +
@@ -316,10 +333,10 @@
 
     return e(RN.ScrollView, { style: { flex: 1 } },
       e(FormSection, { title: "Look" },
-        sw("monoFont", "Monospace font", "Use a monospace font everywhere, like system24."),
+        sw("monoFont", "Force monospace font (fallback)", "Prefer the DM Mono font pack in Kettu > Fonts. Use this only if that doesn't work."),
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
-        sw("boxy", "Boxy panels", "Square corners and thin borders. Fully restart Discord after changing.")
+        sw("boxy", "Boxy panels (experimental)", "Square corners and thin borders. Fully restart Discord after changing.")
       ),
       e(FormSection, { title: "Hide" },
         sw("hideQuests", "Hide Quests", "Removes quest banners, cards and popups."),
