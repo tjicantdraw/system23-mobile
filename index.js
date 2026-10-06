@@ -11,17 +11,18 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 6;
+  var VERSION = 7;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
     monoFont: false,
     fontFamily: "monospace",
     letterSpacing: "-0.3",
-    boxy: false,
+    boxy: true,
     hideQuests: true,
     hideUpsells: true,
     blockQuestRequests: true,
+    recolor: true,
     extraPatterns: ""
   };
   if (storage.__version !== VERSION) {
@@ -138,6 +139,150 @@
     return out;
   }
 
+
+  // ------------------------------------------------------------------ recolor + boxy
+  // Discord's new design system ignores Kettu themes, so colors are remapped as styles render:
+  // tinted greys -> system24 neutral greys, Discord blurple -> system24 purple. Others untouched.
+  var COLOR_KEYS = ["backgroundColor", "color", "borderColor", "borderTopColor", "borderBottomColor",
+    "borderLeftColor", "borderRightColor", "tintColor", "textDecorationColor"];
+  var colorCache = new Map();
+  var styleCache = new WeakMap();
+  var colorSeen = {};
+  var colorSeenCount = 0;
+
+  function parseColor(c) {
+    var m, r, g, b, a = 1;
+    c = c.trim().toLowerCase();
+    if (c[0] === "#") {
+      var h = c.slice(1);
+      if (h.length === 3 || h.length === 4) h = h.split("").map(function (x) { return x + x; }).join("");
+      if (h.length !== 6 && h.length !== 8) return null;
+      r = parseInt(h.slice(0, 2), 16); g = parseInt(h.slice(2, 4), 16); b = parseInt(h.slice(4, 6), 16);
+      if (h.length === 8) a = parseInt(h.slice(6, 8), 16) / 255;
+    } else if ((m = c.match(/^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:[ ,/]+([\d.]+%?))?\s*\)$/))) {
+      r = +m[1]; g = +m[2]; b = +m[3];
+      if (m[4] != null) a = m[4].slice(-1) === "%" ? parseFloat(m[4]) / 100 : +m[4];
+    } else return null;
+    if ([r, g, b, a].some(isNaN)) return null;
+    return { r: r / 255, g: g / 255, b: b / 255, a: a };
+  }
+
+  function toHsl(c) {
+    var max = Math.max(c.r, c.g, c.b), min = Math.min(c.r, c.g, c.b), l = (max + min) / 2, h = 0, s = 0, d = max - min;
+    if (d > 0) {
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === c.r) h = ((c.g - c.b) / d + (c.g < c.b ? 6 : 0));
+      else if (max === c.g) h = (c.b - c.r) / d + 2;
+      else h = (c.r - c.g) / d + 4;
+      h *= 60;
+    }
+    return { h: h, s: s, l: l, d: d };
+  }
+
+  function hslToHex(h, s, l, a) {
+    function f(n) {
+      var k = (n + h / 30) % 12, x = s * Math.min(l, 1 - l);
+      var v = l - x * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+      return ("0" + Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16)).slice(-2);
+    }
+    var hex = "#" + f(0) + f(8) + f(4);
+    if (a < 1) hex += ("0" + Math.round(a * 255).toString(16)).slice(-2);
+    return hex;
+  }
+
+  function remapColor(c) {
+    if (typeof c !== "string") return c;
+    var hit = colorCache.get(c);
+    if (hit !== undefined) return hit;
+    var out = c;
+    var p = parseColor(c);
+    if (p) {
+      var hsl = toHsl(p);
+      if (hsl.d < 0.09 || hsl.s < 0.12) {
+        // grey: drop the tint; darken dark surfaces slightly toward system24's #141414-#303030
+        var l = hsl.l < 0.35 ? hsl.l * 0.92 : hsl.l;
+        out = hslToHex(0, 0, l, p.a);
+      } else if (hsl.h >= 215 && hsl.h <= 250 && hsl.s > 0.35) {
+        // Discord blurple -> system24 purple (oklch 70% .12 310 = #b589d6)
+        out = hslToHex(274, Math.min(hsl.s, 0.48), Math.max(0.45, Math.min(hsl.l + 0.04, 0.8)), p.a);
+      }
+    }
+    if (colorSeenCount < 400 && colorSeen[c] === undefined) { colorSeen[c] = out; colorSeenCount++; }
+    colorCache.set(c, out);
+    return out;
+  }
+
+  function isPlainStyle(o) {
+    // leave Animated / Reanimated style objects alone: copying them breaks animations
+    if (o.viewDescriptors || o.viewsRef || o.initial) return false;
+    for (var k in o) {
+      var v = o[k];
+      if (v !== null && typeof v === "object" && k !== "transform" && k !== "shadowOffset") return false;
+    }
+    return true;
+  }
+
+  function remapObject(o) {
+    var cached = styleCache.get(o);
+    if (cached) return cached;
+    var out = o;
+    if (isPlainStyle(o)) {
+      var copy = null;
+      if (storage.recolor) {
+        for (var i = 0; i < COLOR_KEYS.length; i++) {
+          var k = COLOR_KEYS[i];
+          if (typeof o[k] === "string") {
+            var nv = remapColor(o[k]);
+            if (nv !== o[k]) { if (!copy) { copy = {}; for (var kk in o) copy[kk] = o[kk]; } copy[k] = nv; }
+          }
+        }
+      }
+      if (storage.boxy) {
+        var src = copy || o;
+        var r = src.borderRadius;
+        var isCircle = src.width != null && src.width === src.height;
+        if (typeof r === "number" && r >= 6 && r <= 32 && src.backgroundColor && !isCircle) {
+          if (!copy) { copy = {}; for (var k2 in o) copy[k2] = o[k2]; }
+          copy.borderRadius = 4;
+          if (copy.borderWidth == null) { copy.borderWidth = 1; copy.borderColor = BORDER; }
+        }
+      }
+      if (copy) out = copy;
+    }
+    styleCache.set(o, out);
+    return out;
+  }
+
+  function remapStyle(st, depth) {
+    if (!st || typeof st !== "object" || depth > 6) return st;
+    if (Array.isArray(st)) {
+      var changed = false, arr = new Array(st.length);
+      for (var i = 0; i < st.length; i++) { arr[i] = remapStyle(st[i], depth + 1); if (arr[i] !== st[i]) changed = true; }
+      return changed ? arr : st;
+    }
+    return remapObject(st);
+  }
+
+  function styleProps(props) {
+    if (!(storage.recolor || storage.boxy) || !props) return props;
+    try {
+      var out = null;
+      if (props.style) {
+        var ns = remapStyle(props.style, 0);
+        if (ns !== props.style) { out = {}; for (var k in props) out[k] = props[k]; out.style = ns; }
+      }
+      if (storage.recolor) {
+        ["color", "tintColor", "backgroundColor"].forEach(function (key) {
+          if (typeof props[key] === "string") {
+            var nv = remapColor(props[key]);
+            if (nv !== props[key]) { if (!out) { out = {}; for (var k3 in props) out[k3] = props[k3]; } out[key] = nv; }
+          }
+        });
+      }
+      return out || props;
+    } catch (e) { noteError("recolor", e); return props; }
+  }
+
   // Hidden components are swapped for this empty placeholder instead of being removed,
   // because some Discord code (e.g. the server list) crashes if an element is missing.
   function Hidden() { return null; }
@@ -165,10 +310,14 @@
         var p = args[1] || {};
         args[0] = Hidden;
         args[1] = p.key != null ? { key: p.key } : {};
-      } else if (props0 && (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant)))) {
-        // RN's Text, or Discord's own Text component (identified by its "variant" prop).
-        args = Array.prototype.slice.call(args);
-        args[1] = monoProps(props0);
+      } else if (props0) {
+        var np = props0;
+        if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
+        np = styleProps(np);
+        if (np !== props0) {
+          args = Array.prototype.slice.call(args);
+          args[1] = np;
+        }
       }
     } catch (e) {
       noteError("element", e);
@@ -241,7 +390,7 @@
 
     tryPatch("StyleSheet.create", function () {
       return patcher.before("create", StyleSheet, function (args) {
-        if (!storage.boxy || !args[0] || typeof args[0] !== "object") return;
+        return; // boxy is now applied at render time (see remapObject)
         try {
           var src = args[0];
           var copy = {};
@@ -278,7 +427,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v6 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v7 loaded");
     } catch (e) {}
   }
 
@@ -340,7 +489,9 @@
     var related = top.filter(function (n) { return CANDIDATE_RE.test(n); });
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
-    var report = "system24 mobile v6 debug" +
+    var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
+    var report = "system24 mobile v7 debug" +
+      "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
       "\n\nRN Text created: " + rnTextHits +
@@ -357,7 +508,8 @@
         sw("monoFont", "Force monospace font (fallback)", "Prefer the DM Mono font pack in Kettu > Fonts. Use this only if that doesn't work."),
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
-        sw("boxy", "Boxy panels (experimental)", "Square corners and thin borders. Fully restart Discord after changing.")
+        sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
+        sw("boxy", "Boxy panels", "Square corners and thin borders on cards and buttons.")
       ),
       e(FormSection, { title: "Hide" },
         sw("hideQuests", "Hide Quests", "Removes quest banners, cards and popups."),
