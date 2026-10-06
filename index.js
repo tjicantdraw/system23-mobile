@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 11;
+  var VERSION = 12;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -23,6 +23,9 @@
     hideUpsells: true,
     blockQuestRequests: true,
     recolor: true,
+    outlines: true,
+    outlineColor: "#484848",
+    outlineWidth: "1.5",
     recolorText: false,
     extraPatterns: ""
   };
@@ -293,9 +296,27 @@
           copy[rk] = BOX_RADIUS;
           squared = true;
         }
-        if (squared && src.backgroundColor && src.borderWidth == null && src.backgroundColor !== "transparent") {
-          copy.borderWidth = 1;
-          copy.borderColor = BORDER;
+        if (storage.outlines) {
+          var oc = String(storage.outlineColor || "#484848");
+          var ow = Number(storage.outlineWidth) || 1.5;
+          var hasBg = src.backgroundColor && src.backgroundColor !== "transparent";
+          if (squared && hasBg && src.borderWidth == null) {
+            // system24-style outline on boxed panels, cards, inputs and buttons
+            if (!copy) { copy = {}; for (var k4 in o) copy[k4] = o[k4]; }
+            copy.borderWidth = ow;
+            copy.borderColor = oc;
+          } else {
+            // recolor Discord's own borders / divider lines so every line matches
+            var BW = ["borderWidth", "borderTopWidth", "borderBottomWidth", "borderLeftWidth", "borderRightWidth"];
+            var hasBorder = false;
+            for (var bi = 0; bi < BW.length; bi++) if (typeof src[BW[bi]] === "number" && src[BW[bi]] > 0) hasBorder = true;
+            if (hasBorder) {
+              if (!copy) { copy = {}; for (var k5 in o) copy[k5] = o[k5]; }
+              ["borderColor", "borderTopColor", "borderBottomColor", "borderLeftColor", "borderRightColor"].forEach(function (ck) {
+                if (src[ck] != null || ck === "borderColor") copy[ck] = oc;
+              });
+            }
+          }
         }
       }
       if (copy) out = copy;
@@ -478,7 +499,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v11 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v12 loaded");
     } catch (e) {}
   }
 
@@ -510,7 +531,7 @@
       }
       return e(FormSwitchRow, {
         key: key, label: label, subLabel: sub, value: !!storage[key],
-        onValueChange: function (v) { storage[key] = v; resetCache(); refresh(); }
+        onValueChange: function (v) { storage[key] = v; resetCache(); styleCache = new WeakMap(); refresh(); }
       });
     }
 
@@ -541,7 +562,7 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v11 debug" +
+    var report = "system24 mobile v12 debug" +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
@@ -560,7 +581,10 @@
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
         sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
-        sw("boxy", "Boxy panels", "Square corners and thin borders on cards and buttons.")
+        sw("boxy", "Boxy panels", "Square corners on cards, inputs, buttons and images."),
+        sw("outlines", "Outlines", "system24-style outlines on boxes, and matching divider lines."),
+        input("outlineColor", "Outline color", "#484848", function () { styleCache = new WeakMap(); }),
+        input("outlineWidth", "Outline thickness", "1.5", function () { styleCache = new WeakMap(); })
       ),
       e(FormSection, { title: "Hide" },
         sw("hideQuests", "Hide Quests", "Removes quest banners, cards and popups."),
