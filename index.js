@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 12;
+  var VERSION = 13;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -242,8 +242,7 @@
 
   function isAnimatedValue(v) {
     return v !== null && typeof v === "object" && (
-      typeof v.__getValue === "function" || v._isReanimatedSharedValue || v.__reanimatedHostObjectRef ||
-      typeof v.addListener === "function" || v._animation !== undefined);
+      v._isReanimatedSharedValue || v.__reanimatedHostObjectRef || v.__workletHash !== undefined);
   }
 
   function isPlainStyle(o) {
@@ -300,7 +299,18 @@
           var oc = String(storage.outlineColor || "#484848");
           var ow = Number(storage.outlineWidth) || 1.5;
           var hasBg = src.backgroundColor && src.backgroundColor !== "transparent";
-          if (squared && hasBg && src.borderWidth == null) {
+          var isHighlight = false;
+          if (typeof src.backgroundColor === "string") {
+            var pc = parseColor(src.backgroundColor);
+            if (pc && pc.a > 0.04 && pc.a < 0.45) { var hh = toHsl(pc); isHighlight = hh.s < 0.15; }
+          }
+          if (isHighlight && src.borderWidth == null) {
+            // selected channel / pressed row highlight
+            if (!copy) { copy = {}; for (var k6 in o) copy[k6] = o[k6]; }
+            copy.borderWidth = ow;
+            copy.borderColor = oc;
+            if (typeof copy.borderRadius !== "number" || copy.borderRadius > BOX_RADIUS) copy.borderRadius = BOX_RADIUS;
+          } else if (squared && hasBg && src.borderWidth == null) {
             // system24-style outline on boxed panels, cards, inputs and buttons
             if (!copy) { copy = {}; for (var k4 in o) copy[k4] = o[k4]; }
             copy.borderWidth = ow;
@@ -335,13 +345,40 @@
     return remapObject(st);
   }
 
-  function styleProps(props) {
+  var ICON_RE = /Clip|GuildIcon|GuildsBar|Folder|Squircle|Mask/;
+  var iconProps = {};
+  function scoutIconProps(name, props) {
+    if (iconProps[name] || Object.keys(iconProps).length > 25) return;
+    var parts = [];
+    for (var k in props) {
+      if (k === "children" || k === "style") continue;
+      var v = props[k];
+      if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") parts.push(k + "=" + String(v).slice(0, 20));
+      else parts.push(k);
+    }
+    iconProps[name] = parts.slice(0, 25).join(" ");
+  }
+
+  function styleProps(props, type) {
     if (!(storage.recolor || storage.boxy) || !props) return props;
     try {
       var out = null;
+      var tname = nameOf(type) || (typeof type === "string" ? type : "");
+      if (tname && ICON_RE.test(tname)) {
+        scoutIconProps(tname, props);
+        if (storage.boxy) {
+          for (var pk in props) {
+            var pv = props[pk];
+            if (/radius/i.test(pk) && typeof pv === "number" && pv > BOX_RADIUS && pv < 100) {
+              if (!out) { out = {}; for (var c0 in props) out[c0] = props[c0]; }
+              out[pk] = BOX_RADIUS;
+            }
+          }
+        }
+      }
       if (props.style) {
         var ns = remapStyle(props.style, 0);
-        if (ns !== props.style) { out = {}; for (var k in props) out[k] = props[k]; out.style = ns; }
+        if (ns !== props.style) { if (!out) { out = {}; for (var k in props) out[k] = props[k]; } out.style = ns; }
       }
       if (storage.recolor) {
         ["color", "tintColor", "backgroundColor"].forEach(function (key) {
@@ -385,7 +422,7 @@
       } else if (props0) {
         var np = props0;
         if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
-        np = styleProps(np);
+        np = styleProps(np, type);
         if (np !== props0) {
           args = Array.prototype.slice.call(args);
           args[1] = np;
@@ -499,7 +536,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v12 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v13 loaded");
     } catch (e) {}
   }
 
@@ -562,7 +599,9 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v12 debug" +
+    var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
+    var report = "system24 mobile v13 debug" +
+      "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
