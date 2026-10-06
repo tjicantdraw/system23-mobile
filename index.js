@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 5;
+  var VERSION = 6;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -53,12 +53,12 @@
   var BORDER = "#303030"; // --bg-1
 
   // Component names. "Quest" is case-sensitive so "Request…" never matches.
-  var QUEST_RE = /(^|[^a-z])Quest(?!ion)/;
-  var UPSELL_RE = /Upsell|NitroPromo|PremiumPromo|GiftButton|PremiumGift|ShopEntry|ShopUpsell|ShopBanner|CollectiblesShop|CollectiblesUpsell|ShopThisLook|MarketingCoachmark|^ChatInputActionButtonGift$/;
+  var QUEST_RE = /(^|[^a-z])Quest(?!ion)|^OrbsBalance/;
+  var UPSELL_RE = /Upsell|NitroPromo|PremiumPromo|GiftButton|PremiumGift|ShopEntry|ShopUpsell|ShopBanner|CollectiblesShop|CollectiblesUpsell|ShopThisLook|MarketingCoachmark|^ChatInputActionButtonGift$|^ChatInputActionButtonGiftOrThread$/;
   // Things that look related but weren't hidden — shown in the debug list so we can add them.
   var CANDIDATE_RE = /quest|nitro|premium|upsell|shop|gift|collectible|promo|boost|orb|wishlist/i;
   // Buttons/rows recognised by their visible label (e.g. the "Quests" button on the You tab).
-  var QUEST_LABEL_RE = /^(quests?|orbs|orbs balance)$/i;
+  var QUEST_LABEL_RE = /^(quests?|orbs|orbs balance.*)$/i;
   var UPSELL_LABEL_RE = /^(shop|get nitro|nitro|send a gift|gift nitro)$/i;
   var labelHits = {};
   function labelOf(props) {
@@ -278,7 +278,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v5 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v6 loaded");
     } catch (e) {}
   }
 
@@ -340,7 +340,7 @@
     var related = top.filter(function (n) { return CANDIDATE_RE.test(n); });
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
-    var report = "system24 mobile v5 debug" +
+    var report = "system24 mobile v6 debug" +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
       "\n\nRN Text created: " + rnTextHits +
