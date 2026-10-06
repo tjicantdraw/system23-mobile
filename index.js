@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 7;
+  var VERSION = 8;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -23,6 +23,7 @@
     hideUpsells: true,
     blockQuestRequests: true,
     recolor: true,
+    recolorText: true,
     extraPatterns: ""
   };
   if (storage.__version !== VERSION) {
@@ -190,18 +191,40 @@
     return hex;
   }
 
+  // Discord sometimes passes color *names* (design tokens) that its native code resolves.
+  var TOKEN_MAP = {
+    "text-default": "#aeaeae", "text-normal": "#aeaeae",
+    "mobile-text-heading-primary": "#cecece", "text-strong": "#cecece", "header-primary": "#cecece",
+    "interactive-text-active": "#eeeeee", "interactive-active": "#eeeeee",
+    "text-muted": "#808080", "text-subtle": "#808080", "header-secondary": "#808080",
+    "redesign-channel-name-text": "#aeaeae", "redesign-channel-name-muted-text": "#808080",
+    "channel-icon": "#808080", "interactive-normal": "#808080", "interactive-muted": "#484848"
+  };
+  function remapToken(c) {
+    if (!storage.recolorText) return c;
+    if (TOKEN_MAP[c]) return TOKEN_MAP[c];
+    if (/(^|-)brand(-|$)/.test(c) && /text|icon|link/.test(c)) return "#b589d6";
+    return c;
+  }
+
   function remapColor(c) {
     if (typeof c !== "string") return c;
+    if (/^[a-z]+(-[a-z0-9]+)+$/.test(c)) {
+      var t = remapToken(c);
+      if (colorSeenCount < 400 && colorSeen[c] === undefined) { colorSeen[c] = t; colorSeenCount++; }
+      return t;
+    }
     var hit = colorCache.get(c);
     if (hit !== undefined) return hit;
     var out = c;
     var p = parseColor(c);
     if (p) {
       var hsl = toHsl(p);
-      if (hsl.d < 0.09 || hsl.s < 0.12) {
-        // grey: drop the tint; darken dark surfaces slightly toward system24's #141414-#303030
-        var l = hsl.l < 0.35 ? hsl.l * 0.92 : hsl.l;
-        out = hslToHex(0, 0, l, p.a);
+      if (hsl.d < 0.004) {
+        // already neutral grey (possibly one we produced): leave it, so layers don't stack darkening
+      } else if (hsl.d < 0.09 || hsl.s < 0.12) {
+        // tinted grey -> neutral grey at the same lightness
+        out = hslToHex(0, 0, hsl.l, p.a);
       } else if (hsl.h >= 215 && hsl.h <= 250 && hsl.s > 0.35) {
         // Discord blurple -> system24 purple (oklch 70% .12 310 = #b589d6)
         out = hslToHex(274, Math.min(hsl.s, 0.48), Math.max(0.45, Math.min(hsl.l + 0.04, 0.8)), p.a);
@@ -427,7 +450,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v7 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v8 loaded");
     } catch (e) {}
   }
 
@@ -490,7 +513,7 @@
     var textList = Object.keys(textHosts).map(function (n) { return n + " x" + textHosts[n]; });
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
-    var report = "system24 mobile v7 debug" +
+    var report = "system24 mobile v8 debug" +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
       "\n\nJSX runtimes patched: " + jsxRuntimeCount +
@@ -509,6 +532,7 @@
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
         sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
+        sw("recolorText", "system24 text colors", "Also recolor Discord's named text colors. Turn off if text looks wrong."),
         sw("boxy", "Boxy panels", "Square corners and thin borders on cards and buttons.")
       ),
       e(FormSection, { title: "Hide" },
