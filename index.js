@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 24;
+  var VERSION = 25;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -622,6 +622,14 @@
     return hit;
   }
 
+
+  // Decorative images go inside a touch-transparent container: Android ignores pointerEvents on
+  // an Image itself, so a bare overlay image would swallow taps meant for what's underneath.
+  function decoImg(p) {
+    return React.createElement(View, { key: p.key, pointerEvents: "none", style: p.style },
+      React.createElement(Image, { source: p.source, resizeMode: p.resizeMode, style: { width: "100%", height: "100%" } }));
+  }
+
   // The wrapped original is created with this flag on, so it is never wrapped again (no loop).
   var creatingInner = false;
   // While building our own ornament pieces, the hook leaves them exactly as written.
@@ -646,14 +654,14 @@
       w = React.forwardRef(function (props, ref) {
         var sz = 22, o = 0, src = { uri: ASSET + "corner.png" };
         var c = function (k, pos, tf) {
-          return e(Image, { key: k, source: src, pointerEvents: "none",
+          return decoImg({ key: k, source: src, pointerEvents: "none",
             style: Object.assign({ position: "absolute", width: sz, height: sz, zIndex: 2, transform: tf }, pos) });
         };
         scoutPlate();
         var fill = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
         var inner = innerEl(orig, props, ref);
         return raw(function () { return e(React.Fragment, null, inner,
-          storage.plateFade ? e(Image, { key: "fade", source: { uri: ASSET + "fade.png" }, resizeMode: "stretch", pointerEvents: "none",
+          storage.plateFade ? decoImg({ key: "fade", source: { uri: ASSET + "fade.png" }, resizeMode: "stretch", pointerEvents: "none",
             style: Object.assign({ width: undefined, height: undefined, borderRadius: boxR() }, fill) }) : null,
           e(View, { key: "edge", pointerEvents: "none",
             style: Object.assign({ borderWidth: 1, borderColor: accentFor(false), borderRadius: boxR() }, fill) }),
@@ -676,15 +684,15 @@
                 overflow: "hidden", borderWidth: 1, borderBottomWidth: 0, borderColor: edge, backgroundColor: "#0b0c0d" } },
               e(Image, { source: { uri: url }, resizeMode: "cover", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined } }),
               e(Image, { source: { uri: ASSET + "fadev.png" }, resizeMode: "stretch", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined } })),
-            e(Image, { key: "btl", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, left: -3, width: 22, height: 22, zIndex: 3 } }),
-            e(Image, { key: "btr", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, right: -3, width: 22, height: 22, zIndex: 3, transform: [{ scaleX: -1 }] } }));
+            decoImg({ key: "btl", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, left: -3, width: 22, height: 22, zIndex: 3 } }),
+            decoImg({ key: "btr", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, right: -3, width: 22, height: 22, zIndex: 3, transform: [{ scaleX: -1 }] } }));
         });
       });
     } else if (kind === "frame") {
       w = React.forwardRef(function (props, ref) {
         var sz = 22, o = -4, src = { uri: ASSET + "corner.png" };
         var c = function (k, pos, tf) {
-          return e(Image, { key: k, source: src, pointerEvents: "none",
+          return decoImg({ key: k, source: src, pointerEvents: "none",
             style: Object.assign({ position: "absolute", width: sz, height: sz, transform: tf }, pos) });
         };
         return e(View, { style: { position: "relative" } }, innerEl(orig, props, ref),
@@ -706,8 +714,8 @@
         var inner = innerEl(orig, props, ref);
         return raw(function () {
           return e(React.Fragment, null, inner,
-            e(Image, { key: "scales", source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
-              style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined, opacity: isNaN(op) ? 0.55 : op } }));
+            decoImg({ key: "scales", source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
+              style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: -1, opacity: isNaN(op) ? 0.55 : op } }));
         });
       });
     }
@@ -830,7 +838,7 @@
   function cornerEls2() {
     var e = React.createElement, sz = 20, o = -3, src = { uri: ASSET + "corner.png" };
     var c = function (k, pos, tf) {
-      return e(Image, { key: "orn-" + k, source: src, pointerEvents: "none",
+      return decoImg({ key: "orn-" + k, source: src, pointerEvents: "none",
         style: Object.assign({ position: "absolute", width: sz, height: sz, transform: tf }, pos) });
     };
     return [c("tl", { top: o, left: o }, []), c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
@@ -1043,7 +1051,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v24)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v25)");
     } catch (e) {}
   }
 
@@ -1109,7 +1117,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v24 debug" +
+    var report = "system24 mobile v25 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
