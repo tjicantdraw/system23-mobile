@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 33;
+  var VERSION = 34;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -853,7 +853,6 @@
     if (storage.chatBg && chatMatch(n)) { countOrn("phoenix:" + n); return wrapperFor("phoenix", type); }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
     if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
-    if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
     return null;
   }
 
@@ -963,6 +962,18 @@
           args = Array.prototype.slice.call(args);
           args[0] = ornType;
           type = ornType;
+        }
+        // Framed components ("Also frame these", e.g. Card): corners go in as extra children, so the
+        // component keeps its own layout (wrapping a full-screen Card collapsed whole pages).
+        if (storage.ornFrames && ASSET && !creatingInner && tname && typeof type !== "string" && frameMatch(tname)) {
+          countOrn("frame:" + tname);
+          args = Array.prototype.slice.call(args);
+          if (args.length > 2) args = args.concat(cornerEls());
+          else {
+            np = Object.assign({}, np);
+            var fkids = np.children == null ? [] : [].concat(np.children);
+            np.children = fkids.concat(cornerEls());
+          }
         }
         np = headerText(type, np);
         if (P().roundServers && tname === "GuildsBarAnimatedItemWrapper" && np.circle === false) {
@@ -1112,7 +1123,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v33)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v34)");
     } catch (e) {}
   }
 
@@ -1178,7 +1189,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v33 debug" +
+    var report = "system24 mobile v34 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
