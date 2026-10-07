@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 22;
+  var VERSION = 24;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -32,6 +32,7 @@
     autoFrames: true,
     ornPlates: true,
     plateFade: true,
+    plateLists: false,
     acctBanner: true,
     bannerHeight: "64",
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
@@ -699,12 +700,15 @@
           e(View, { style: { flex: 1 } }, innerEl(tagWrapped(orig, "category"), props, ref)));
       });
     } else {
+      // Scales sit right after the channel-list backdrop, filling the same box (no layout change).
       w = React.forwardRef(function (props, ref) {
         var op = Number(storage.scaleOpacity);
-        return e(View, { style: { flex: 1 } },
-          e(Image, { source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
-            style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined, opacity: isNaN(op) ? 0.55 : op } }),
-          innerEl(orig, props, ref));
+        var inner = innerEl(orig, props, ref);
+        return raw(function () {
+          return e(React.Fragment, null, inner,
+            e(Image, { key: "scales", source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
+              style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined, opacity: isNaN(op) ? 0.55 : op } }));
+        });
       });
     }
     w.displayName = "Orn_" + kind + "_" + (nameOf(orig) || "x");
@@ -784,11 +788,12 @@
     if (storage.acctBanner && n === "YouBarBackground") { countOrn("banner"); return wrapperFor("banner", type); }
     if (storage.ornFrames && storage.ornPlates && n === "Nameplate") {
       var inBar = currentTag() === "youbar";
+      if (!inBar && !storage.plateLists) return null;   // DM / member lists: leave nameplates alone
       countOrn(inBar ? "plateBar" : "plate");
       return wrapperFor(inBar ? "plateBar" : "plate", type);
     }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
-    if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
+    if (storage.ornScales && n === "ChannelListPanelBackdrop") { countOrn("scales"); return wrapperFor("scales", type); }
     if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
     return null;
   }
@@ -1038,7 +1043,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v22)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v24)");
     } catch (e) {}
   }
 
@@ -1104,7 +1109,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v22 debug" +
+    var report = "system24 mobile v24 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
@@ -1159,12 +1164,13 @@
         sw("acctBanner", "Banner on account bar", "Your profile banner rises above the account bar."),
         input("bannerHeight", "Banner height", "64"),
         sw("plateFade", "Fade nameplates", "Darkens nameplate art on the left so names stay readable."),
+        sw("plateLists", "Frame nameplates in lists too", "Also frame and fade nameplates in DMs and member lists (busy)."),
         sw("ornPlates", "Frame nameplates", "Claw corners on nameplates (the art behind names in your account bar and member lists)."),
         sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
         input("frameTargets", "Also frame these components (regex)", "^Card$"),
         sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
-        sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
+        sw("ornScales", "Dragon-scale texture", "Faint scales behind the channel list."),
         input("scaleOpacity", "Scale texture strength (0 to 1)", "0.55")
       ),
       e(FormSection, { title: "Extras" },
