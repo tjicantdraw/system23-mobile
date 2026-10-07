@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 20;
+  var VERSION = 21;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -211,9 +211,43 @@
     return null;
   }
   var ownerKind = new WeakMap();
+  // Render tags: when a component we care about draws, we wrap its render function so every
+  // element it creates while drawing knows "I'm inside an avatar / a server icon / a category".
+  var tagStack = [];
+  var tagWrapCache = new WeakMap();
+  var tagWrappers = new WeakSet();
+  function currentTag() { return tagStack.length ? tagStack[tagStack.length - 1] : null; }
+  function wrapRender(fn, tag) {
+    var w = function () {
+      tagStack.push(tag);
+      try { return fn.apply(this, arguments); } finally { tagStack.pop(); }
+    };
+    return w;
+  }
+  function tagWrapped(type, tag) {
+    if (!type || tagWrappers.has(type)) return type;
+    var w = tagWrapCache.get(type);
+    if (w) return w;
+    if (typeof type === "function") {
+      if (type.prototype && type.prototype.isReactComponent) return type; // class components: leave alone
+      w = wrapRender(type, tag);
+      w.displayName = nameOf(type);
+      if (type.defaultProps) w.defaultProps = type.defaultProps;
+    } else if (typeof type === "object" && typeof type.render === "function") {
+      w = Object.assign({}, type, { render: wrapRender(type.render, tag) });     // forwardRef
+    } else if (typeof type === "object" && type.type) {
+      w = Object.assign({}, type, { type: tagWrapped(type.type, tag) });       // memo
+    } else return type;
+    tagWrapCache.set(type, w);
+    tagWrappers.add(w);
+    return w;
+  }
+
   function exemptKind(type) {
     var k = kindOf(nameOf(type));
     if (k) return k;
+    var tg = currentTag();
+    if (tg && tg !== "category") { ownerTracking = "render tags"; return tg; }
     var f = currentOwner();
     if (!f) return null;
     ownerTracking = "on";
@@ -641,7 +675,7 @@
       w = React.forwardRef(function (props, ref) {
         return e(View, { style: { flexDirection: "row", alignItems: "center" } },
           e(Image, { source: { uri: ASSET + "star.png" }, pointerEvents: "none", style: { width: 12, height: 12, marginLeft: 10, marginRight: -4 } }),
-          e(View, { style: { flex: 1 } }, innerEl(orig, props, ref)));
+          e(View, { style: { flex: 1 } }, innerEl(tagWrapped(orig, "category"), props, ref)));
       });
     } else {
       w = React.forwardRef(function (props, ref) {
@@ -655,6 +689,32 @@
     w.displayName = "Orn_" + kind + "_" + (nameOf(orig) || "x");
     cache.set(orig, w);
     return w;
+  }
+
+  // Account bar scouting: find elements labelled with your own name, and plate-like components.
+  var meNames = null, meHits = {}, plateNames = {};
+  function myNames() {
+    if (meNames) return meNames;
+    try {
+      var US = metro.findByStoreName && metro.findByStoreName("UserStore");
+      var me = US && US.getCurrentUser && US.getCurrentUser();
+      if (me) meNames = [me.username, me.globalName].filter(Boolean).map(function (n) { return String(n).toLowerCase(); });
+    } catch (e) {}
+    return meNames || [];
+  }
+  function scoutMe(type, props) {
+    var n = nameOf(type);
+    if (n && /plate|nameplate|panel|account|selfuser|currentuser|youbar/i.test(n)) plateNames[n] = (plateNames[n] || 0) + 1;
+    var l = labelOf(props);
+    if (!l) return;
+    var low = l.toLowerCase(), names = myNames();
+    for (var i = 0; i < names.length; i++) {
+      if (names[i] && low.indexOf(names[i]) !== -1) {
+        var k = (n || "?") + "[" + l.slice(0, 40) + "]";
+        meHits[k] = (meHits[k] || 0) + 1;
+        return;
+      }
+    }
   }
 
   // Scouting for the banner-strip account card.
@@ -742,7 +802,7 @@
     if (!storage.ornStars || !props) return props;
     var n = nameOf(type);
     if (n !== "Text" && type !== Text) return props;
-    if (ownerChain().indexOf("CategoryChannel") === -1) return props;
+    if (currentTag() !== "category" && ownerChain().indexOf("CategoryChannel") === -1) return props;
     countOrn("headerText");
     var out = Object.assign({}, props);
     out.style = [props.style, HEADER_STYLE];
@@ -768,6 +828,7 @@
       var type = args[0];
       var props0 = args[1];
       scout(type, props0);
+      try { scoutMe(type, props0); } catch (e) {}
       if (type === Text) rnTextHits++;
       var lbl = labelOf(props0);
       if (lbl && CANDIDATE_RE.test(lbl)) {
@@ -790,6 +851,12 @@
         args[1] = p.key != null ? { key: p.key } : {};
       } else if (props0) {
         var np = props0;
+        var tname = nameOf(type);
+        var tkind = kindOf(tname) || (tname === "CategoryChannel" && !storage.ornStars ? "category" : null);
+        if (tkind && typeof type !== "string" && !tagWrappers.has(type)) {
+          var tw = tagWrapped(type, tkind);
+          if (tw !== type) { args = Array.prototype.slice.call(args); args[0] = tw; }
+        }
         var ornType = ornamentFor(type);
         if (ornType) {
           args = Array.prototype.slice.call(args);
@@ -932,7 +999,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v20)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v21)");
     } catch (e) {}
   }
 
@@ -998,9 +1065,11 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v20 debug" +
+    var report = "system24 mobile v21 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
+      "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
+      "\nPlate/panel-like components: " + (Object.keys(plateNames).map(function (k) { return k + " x" + plateNames[k]; }).join(", ") || "none") +
       "\nNameplate owners: " + (Object.keys(plateOwners).map(function (k) { return k + " x" + plateOwners[k]; }).join(" | ") || "none yet") +
       "\nBanner: " + bannerInfo() +
       "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
