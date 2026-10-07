@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 30;
+  var VERSION = 31;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -630,7 +630,8 @@
   // an Image itself, so a bare overlay image would swallow taps meant for what's underneath.
   function decoImg(p) {
     return React.createElement(View, { key: p.key, pointerEvents: "none", style: p.style },
-      React.createElement(Image, { source: p.source, resizeMode: p.resizeMode, style: { width: "100%", height: "100%" } }));
+      React.createElement(Image, { source: p.source, resizeMode: p.resizeMode, resizeMethod: p.resizeMethod, fadeDuration: 0,
+        style: { width: "100%", height: "100%" } }));
   }
 
   // The wrapped original is created with this flag on, so it is never wrapped again (no loop).
@@ -702,7 +703,7 @@
           return e(React.Fragment, null,
             e(View, { key: "chatbg", pointerEvents: "none",
               style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: chatColor || "#151518" } }),
-            decoImg({ key: "phoenix", source: { uri: ASSET + "phoenix.png" }, resizeMode: "contain", pointerEvents: "none",
+            decoImg({ key: "phoenix", source: { uri: ASSET + "phoenix.png" }, resizeMode: "contain", resizeMethod: "scale", pointerEvents: "none",
               style: { position: "absolute", top: 24, left: 16, right: 16, bottom: 24, opacity: isNaN(op) ? 0.5 : op } }),
             inner);
         });
@@ -1093,7 +1094,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v30)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v31)");
     } catch (e) {}
   }
 
@@ -1159,7 +1160,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v30 debug" +
+    var report = "system24 mobile v31 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
