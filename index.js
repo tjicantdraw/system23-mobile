@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 27;
+  var VERSION = 28;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -35,6 +35,9 @@
     plateLists: false,
     acctBanner: true,
     bannerHeight: "64",
+    chatBg: true,
+    chatBgOpacity: "0.22",
+    chatBgTargets: "^MessagesWrapperConnected$",
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
     recolor: true,
@@ -642,7 +645,7 @@
   }
 
   // forwardRef wrappers keep Discord's refs (list scrolling etc.) working.
-  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap(), plate: new WeakMap(), plateBar: new WeakMap(), banner: new WeakMap() };
+  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap(), plate: new WeakMap(), plateBar: new WeakMap(), banner: new WeakMap(), phoenix: new WeakMap() };
   function wrapperFor(kind, orig) {
     var cache = wrapCache[kind], w = cache.get(orig);
     if (w) return w;
@@ -686,6 +689,19 @@
               e(Image, { source: { uri: ASSET + "fadev.png" }, resizeMode: "stretch", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined } })),
             decoImg({ key: "btl", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, left: -3, width: 22, height: 22, zIndex: 3 } }),
             decoImg({ key: "btr", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, right: -3, width: 22, height: 22, zIndex: 3, transform: [{ scaleX: -1 }] } }));
+        });
+      });
+    } else if (kind === "phoenix") {
+      // Chat background: the phoenix sits behind the message list. The list's own background is
+      // made transparent in elementHook (the element carrying HACK_fixModalInteraction).
+      w = React.forwardRef(function (props, ref) {
+        var op = Number(storage.chatBgOpacity);
+        var inner = innerEl(orig, props, ref);
+        return raw(function () {
+          return e(View, { style: { flex: 1, height: "100%", backgroundColor: chatColor || undefined } },
+            decoImg({ key: "phoenix", source: { uri: ASSET + "phoenix.png" }, resizeMode: "contain", pointerEvents: "none",
+              style: { position: "absolute", top: 24, left: 16, right: 16, bottom: 24, opacity: isNaN(op) ? 0.22 : op } }),
+            inner);
         });
       });
     } else if (kind === "frame") {
@@ -782,6 +798,17 @@
     } catch (e) { return "error: " + (e && e.message); }
   }
 
+  var chatColor = null, chatHits = 0, chatNames = {};
+  var chatRe = null, chatSrc = null;
+  function chatMatch(name) {
+    var src = String(storage.chatBgTargets || "");
+    if (src !== chatSrc) { chatSrc = src; try { chatRe = src ? new RegExp(src) : null; } catch (e) { chatRe = null; } }
+    return !!chatRe && chatRe.test(name);
+  }
+  function scoutChat(name) {
+    if (name && /chat|message/i.test(name)) chatNames[name] = (chatNames[name] || 0) + 1;
+  }
+
   var frameRe = null, frameSrc = null;
   function frameMatch(name) {
     var src = String(storage.frameTargets || "");
@@ -801,6 +828,7 @@
       countOrn(inBar ? "plateBar" : "plate");
       return wrapperFor(inBar ? "plateBar" : "plate", type);
     }
+    if (storage.chatBg && chatMatch(n)) { countOrn("phoenix:" + n); return wrapperFor("phoenix", type); }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
     if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
     if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
@@ -902,6 +930,7 @@
       } else if (props0) {
         var np = props0;
         var tname = nameOf(type);
+        scoutChat(tname);
         var tkind = kindOf(tname) || (tname === "YouBarNameplate" ? "youbar" : null);
         if (tkind && typeof type !== "string" && !tagWrappers.has(type)) {
           var tw = tagWrapped(type, tkind);
@@ -938,6 +967,15 @@
               np.children = kids.concat(cornerEls());
             }
           }
+        }
+        // The message list: remember its color for the backdrop, then let the phoenix show through.
+        if (storage.chatBg && ASSET && "HACK_fixModalInteraction" in props0 && np.style) {
+          try {
+            var cflat = StyleSheet.flatten(np.style) || {};
+            if (cflat.backgroundColor && cflat.backgroundColor !== "transparent") chatColor = cflat.backgroundColor;
+            chatHits++;
+            np = Object.assign({}, np, { style: [np.style, { backgroundColor: "transparent" }] });
+          } catch (e) {}
         }
         if (np !== props0) {
           args = Array.prototype.slice.call(args);
@@ -1052,7 +1090,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v27)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v28)");
     } catch (e) {}
   }
 
@@ -1118,13 +1156,15 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v27 debug" +
+    var report = "system24 mobile v28 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
       "\nPlate/panel-like components: " + (Object.keys(plateNames).map(function (k) { return k + " x" + plateNames[k]; }).join(", ") || "none") +
       "\nNameplate owners: " + (Object.keys(plateOwners).map(function (k) { return k + " x" + plateOwners[k]; }).join(" | ") || "none yet") +
       "\nBanner: " + bannerInfo() +
+      "\nChat background: list seen x" + chatHits + ", color " + (chatColor || "none") +
+      "\nChat/message components: " + (Object.keys(chatNames).sort(function (a, b) { return chatNames[b] - chatNames[a]; }).slice(0, 40).map(function (k) { return k + " x" + chatNames[k]; }).join(", ") || "none yet") +
       "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
       "\n\nStyle: " + (storage.preset || "obsidian") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
@@ -1178,6 +1218,9 @@
         sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
         input("frameTargets", "Also frame these components (regex)", "^Card$"),
+        sw("chatBg", "Phoenix chat background", "The phoenix behind your messages (not the channel list)."),
+        input("chatBgOpacity", "Phoenix strength (0 to 1)", "0.22"),
+        input("chatBgTargets", "Chat view component (regex)", "^MessagesWrapperConnected$"),
         sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
         sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
         input("scaleOpacity", "Scale texture strength (0 to 1)", "0.8")
