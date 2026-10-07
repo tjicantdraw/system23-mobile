@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 17;
+  var VERSION = 18;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -29,6 +29,8 @@
     ornScales: true,
     scaleOpacity: "0.55",
     frameTargets: "^Card$",
+    autoFrames: true,
+    frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
     recolor: true,
     outlines: true,
@@ -646,6 +648,44 @@
     return null;
   }
 
+
+  // Auto frames: any solid, rounded, padded box (a "panel") gets claw corners added as children.
+  var autoFrameOwners = {};
+  var exclRe = null, exclSrc = null;
+  function excluded(chain) {
+    var src = String(storage.frameExclude || "");
+    if (src !== exclSrc) { exclSrc = src; try { exclRe = src ? new RegExp(src) : null; } catch (e) { exclRe = null; } }
+    return !!exclRe && exclRe.test(chain);
+  }
+  function isHostView(type) {
+    return type === View || type === "RCTView" || nameOf(type) === "View";
+  }
+  function num(v) { return typeof v === "number" ? v : 0; }
+  function looksLikePanel(style) {
+    var f = StyleSheet.flatten(style) || {};
+    if (f.position === "absolute") return false;
+    var r = f.borderRadius;
+    if (typeof r !== "number" || r < 8 || r > 28) return false;
+    if (typeof f.width === "number" && f.width === f.height) return false;      // circles / squares (icons)
+    if ((typeof f.width === "number" && f.width < 80) || (typeof f.height === "number" && f.height < 44)) return false;
+    var bg = f.backgroundColor;
+    if (typeof bg === "string") {
+      var pc = parseColor(bg);
+      if (!pc || pc.a < 0.5) return false;
+    } else if (!bg) return false;
+    var pad = Math.max(num(f.padding), num(f.paddingHorizontal), num(f.paddingVertical), num(f.paddingTop), num(f.paddingLeft));
+    return pad >= 10 || num(f.minHeight) >= 56 || num(f.height) >= 56;
+  }
+  function cornerEls() {
+    var e = React.createElement, sz = 20, o = -3, src = { uri: ASSET + "corner.png" };
+    var c = function (k, pos, tf) {
+      return e(Image, { key: "orn-" + k, source: src, pointerEvents: "none",
+        style: Object.assign({ position: "absolute", width: sz, height: sz, transform: tf }, pos) });
+    };
+    return [c("tl", { top: o, left: o }, []), c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
+      c("bl", { bottom: o, left: o }, [{ scaleY: -1 }]), c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }])];
+  }
+
   // Serif small-caps look for text inside category headers.
   var HEADER_STYLE = { fontFamily: "serif", letterSpacing: 1.4, textTransform: "uppercase" };
   function headerText(type, props) {
@@ -710,6 +750,24 @@
         var kind = (storage.boxy || storage.outlines) ? exemptKind(type) : null;
         if (kind === "guild" && !P().roundServers) kind = null;
         np = styleProps(np, type, kind === "avatar" ? "colorOnly" : kind === "tag" ? "noOutline" : kind === "guild" ? "round" : "full");
+        // auto frames (decided on Discord's ORIGINAL style, before our boxy/recolor changes)
+        if (storage.ornFrames && storage.autoFrames && ASSET && !creatingInner && kind == null &&
+            isHostView(type) && props0.style && looksLikePanel(props0.style)) {
+          var chain = ownerChain();
+          if (!excluded(chain)) {
+            var who = chain.split("|")[0] || "?";
+            autoFrameOwners[who] = (autoFrameOwners[who] || 0) + 1;
+            args = Array.prototype.slice.call(args);
+            if (args.length > 2) {
+              // createElement(type, props, ...children): add corners as extra children
+              args = args.concat(cornerEls());
+            } else {
+              np = Object.assign({}, np);
+              var kids = np.children == null ? [] : [].concat(np.children);
+              np.children = kids.concat(cornerEls());
+            }
+          }
+        }
         if (np !== props0) {
           args = Array.prototype.slice.call(args);
           args[1] = np;
@@ -823,7 +881,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v17)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v18)");
     } catch (e) {}
   }
 
@@ -889,9 +947,10 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v17 debug" +
+    var report = "system24 mobile v18 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
+      "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
       "\n\nStyle: " + (storage.preset || "obsidian") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
@@ -936,7 +995,9 @@
       ),
       e(FormSection, { title: "Ornaments" },
         sw("ornFrames", "Claw-corner frames", "Ornate corners on cards and panels."),
-        input("frameTargets", "Frame these components (regex)", "^Card$"),
+        sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
+        input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
+        input("frameTargets", "Also frame these components (regex)", "^Card$"),
         sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
         sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
         input("scaleOpacity", "Scale texture strength (0 to 1)", "0.55")
