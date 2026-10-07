@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 18;
+  var VERSION = 19;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -30,6 +30,7 @@
     scaleOpacity: "0.55",
     frameTargets: "^Card$",
     autoFrames: true,
+    ornPlates: true,
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
     recolor: true,
@@ -592,12 +593,27 @@
   }
 
   // forwardRef wrappers keep Discord's refs (list scrolling etc.) working.
-  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap() };
+  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap(), plate: new WeakMap() };
   function wrapperFor(kind, orig) {
     var cache = wrapCache[kind], w = cache.get(orig);
     if (w) return w;
     var e = React.createElement;
-    if (kind === "frame") {
+    if (kind === "plate") {
+      // Nameplates fill their row, so the corners go NEXT to them (a fragment) and pin to the row's
+      // corners. This leaves the nameplate's own layout untouched.
+      w = React.forwardRef(function (props, ref) {
+        var sz = 22, o = 0, src = { uri: ASSET + "corner.png" };
+        var c = function (k, pos, tf) {
+          return e(Image, { key: k, source: src, pointerEvents: "none",
+            style: Object.assign({ position: "absolute", width: sz, height: sz, zIndex: 2, transform: tf }, pos) });
+        };
+        return e(React.Fragment, null, innerEl(orig, props, ref),
+          c("tl", { top: o, left: o }, []),
+          c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
+          c("bl", { bottom: o, left: o }, [{ scaleY: -1 }]),
+          c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }]));
+      });
+    } else if (kind === "frame") {
       w = React.forwardRef(function (props, ref) {
         var sz = 22, o = -4, src = { uri: ASSET + "corner.png" };
         var c = function (k, pos, tf) {
@@ -642,6 +658,7 @@
     if (!ASSET || creatingInner) return null;
     var n = nameOf(type);
     if (!n || /^Orn_/.test(n)) return null;
+    if (storage.ornFrames && storage.ornPlates && n === "Nameplate") { countOrn("plate"); return wrapperFor("plate", type); }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
     if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
     if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
@@ -881,7 +898,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v18)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v19)");
     } catch (e) {}
   }
 
@@ -947,7 +964,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v18 debug" +
+    var report = "system24 mobile v19 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
@@ -995,6 +1012,7 @@
       ),
       e(FormSection, { title: "Ornaments" },
         sw("ornFrames", "Claw-corner frames", "Ornate corners on cards and panels."),
+        sw("ornPlates", "Frame nameplates", "Claw corners on nameplates (the art behind names in your account bar and member lists)."),
         sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
         input("frameTargets", "Also frame these components (regex)", "^Card$"),
