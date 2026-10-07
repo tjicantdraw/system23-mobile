@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 32;
+  var VERSION = 33;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -420,6 +420,23 @@
   var modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap(), round: new WeakMap() };
   function remapObject(o, mode, ctx) {
     mode = mode || "full";
+    // "<mode>|v": a component's own style prop. Only change values that already exist, never add
+    // fields; some of Discord's screens hand these objects to native code that rejects unknown keys.
+    var valuesOnly = mode.slice(-2) === "|v";
+    if (valuesOnly) {
+      var bm = mode.slice(0, -2);
+      // outlines and highlights are left for the native view underneath (which sees the original colors)
+      var base = remapObject(o, bm === "full" ? "plain" : bm, ctx);
+      if (base === o) return o;
+      var vcache = modeCaches[mode] || (modeCaches[mode] = new WeakMap());
+      var vhit = !ctx && vcache.get(o);
+      if (vhit) return vhit;
+      var vo = {}, any = false;
+      for (var vk in o) { vo[vk] = vk in base ? base[vk] : o[vk]; if (vo[vk] !== o[vk]) any = true; }
+      vo = any ? vo : o;
+      if (!ctx) vcache.set(o, vo);
+      return vo;
+    }
     // only cache when the result can't depend on sibling styles
     var cacheable = !ctx;
     var cache = modeCaches[mode] || (modeCaches[mode] = new WeakMap());
@@ -582,7 +599,8 @@
         }
       }
       if (props.style) {
-        var ns = remapStyle(props.style, 0, mode, null);
+        // Native views (string types) get the full treatment; components only get value changes.
+        var ns = remapStyle(props.style, 0, typeof type === "string" ? mode : mode + "|v", null);
         if (ns !== props.style) { if (!out) { out = {}; for (var k in props) out[k] = props[k]; } out.style = ns; }
       }
       if (storage.recolor) {
@@ -1094,7 +1112,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v32)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v33)");
     } catch (e) {}
   }
 
@@ -1160,7 +1178,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v32 debug" +
+    var report = "system24 mobile v33 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
