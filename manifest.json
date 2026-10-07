@@ -3,6 +3,6 @@
   "description": "Dark fantasy themes for Discord mobile (Obsidian, Ashen, Bloodmoon, Grimoire), plus no Quests, Nitro or Shop.",
   "authors": [{ "name": "system24 mobile", "id": "0" }],
   "main": "index.js",
-  "hash": "46c49489e4e2ba68464e1e94841914f9afe07e4f883bc5b3ee2c0e0d8c787522",
+  "hash": "32029a645c35dd2516df32c9ad3d3acb60194698b61a807508a3d30593b28ece",
   "vendetta": { "icon": "ic_palette" }
 }

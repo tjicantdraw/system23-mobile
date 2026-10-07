@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 16;
+  var VERSION = 17;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -24,6 +24,11 @@
     blockQuestRequests: true,
     preset: "obsidian",
     accentOverride: "",
+    ornFrames: true,
+    ornStars: true,
+    ornScales: true,
+    scaleOpacity: "0.55",
+    frameTargets: "^Card$",
     sectionIcons: true,
     recolor: true,
     outlines: true,
@@ -553,6 +558,107 @@
   function Hidden() { return null; }
   Hidden.displayName = "System24Hidden";
 
+
+  // ------------------------------------------------------------------ ornaments
+  // Images live next to the plugin in your repo (corner.png, star.png, scales.png).
+  var ASSET = String(vendetta.plugin.id || "");
+  if (ASSET && ASSET.slice(-1) !== "/") ASSET += "/";
+  var Image = RN.Image, View = RN.View;
+  var ornCount = {};
+  function countOrn(k) { ornCount[k] = (ornCount[k] || 0) + 1; }
+
+  // Owner chain as one string ("Inner|CategoryChannel|..."), cached per fiber.
+  var chainCache = new WeakMap();
+  function ownerChain() {
+    var f = currentOwner();
+    if (!f) return "";
+    var hit = chainCache.get(f);
+    if (hit !== undefined) return hit;
+    var names = [], g = f, d = 0;
+    while (g && d < 12) { var n = nameOf(g.type); if (n) names.push(n); g = g.return; d++; }
+    hit = names.join("|");
+    chainCache.set(f, hit);
+    return hit;
+  }
+
+  // The wrapped original is created with this flag on, so it is never wrapped again (no loop).
+  var creatingInner = false;
+  function innerEl(orig, props, ref) {
+    creatingInner = true;
+    try { return React.createElement(orig, Object.assign({}, props, { ref: ref })); }
+    finally { creatingInner = false; }
+  }
+
+  // forwardRef wrappers keep Discord's refs (list scrolling etc.) working.
+  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap() };
+  function wrapperFor(kind, orig) {
+    var cache = wrapCache[kind], w = cache.get(orig);
+    if (w) return w;
+    var e = React.createElement;
+    if (kind === "frame") {
+      w = React.forwardRef(function (props, ref) {
+        var sz = 22, o = -4, src = { uri: ASSET + "corner.png" };
+        var c = function (k, pos, tf) {
+          return e(Image, { key: k, source: src, pointerEvents: "none",
+            style: Object.assign({ position: "absolute", width: sz, height: sz, transform: tf }, pos) });
+        };
+        return e(View, { style: { position: "relative" } }, innerEl(orig, props, ref),
+          c("tl", { top: o, left: o }, []),
+          c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
+          c("bl", { bottom: o, left: o }, [{ scaleY: -1 }]),
+          c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }]));
+      });
+    } else if (kind === "star") {
+      w = React.forwardRef(function (props, ref) {
+        return e(View, { style: { flexDirection: "row", alignItems: "center" } },
+          e(Image, { source: { uri: ASSET + "star.png" }, pointerEvents: "none", style: { width: 12, height: 12, marginLeft: 10, marginRight: -4 } }),
+          e(View, { style: { flex: 1 } }, innerEl(orig, props, ref)));
+      });
+    } else {
+      w = React.forwardRef(function (props, ref) {
+        var op = Number(storage.scaleOpacity);
+        return e(View, { style: { flex: 1 } },
+          e(Image, { source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
+            style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined, opacity: isNaN(op) ? 0.55 : op } }),
+          innerEl(orig, props, ref));
+      });
+    }
+    w.displayName = "Orn_" + kind + "_" + (nameOf(orig) || "x");
+    cache.set(orig, w);
+    return w;
+  }
+
+  var frameRe = null, frameSrc = null;
+  function frameMatch(name) {
+    var src = String(storage.frameTargets || "");
+    if (src !== frameSrc) { frameSrc = src; try { frameRe = src ? new RegExp(src) : null; } catch (e) { frameRe = null; } }
+    return !!frameRe && frameRe.test(name);
+  }
+
+  // Returns a replacement element type, or null to leave it alone.
+  function ornamentFor(type) {
+    if (!ASSET || creatingInner) return null;
+    var n = nameOf(type);
+    if (!n || /^Orn_/.test(n)) return null;
+    if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
+    if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
+    if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
+    return null;
+  }
+
+  // Serif small-caps look for text inside category headers.
+  var HEADER_STYLE = { fontFamily: "serif", letterSpacing: 1.4, textTransform: "uppercase" };
+  function headerText(type, props) {
+    if (!storage.ornStars || !props) return props;
+    var n = nameOf(type);
+    if (n !== "Text" && type !== Text) return props;
+    if (ownerChain().indexOf("CategoryChannel") === -1) return props;
+    countOrn("headerText");
+    var out = Object.assign({}, props);
+    out.style = [props.style, HEADER_STYLE];
+    return out;
+  }
+
   // Grimoire: the # channel icon becomes an italic section mark.
   var SECTION_RE = /^(TextIcon|TextLockIcon)$/;
   var SECTION_SIZES = { xxs: 12, xs: 14, sm: 16, md: 20, lg: 24, custom: 20 };
@@ -593,6 +699,13 @@
         args[1] = p.key != null ? { key: p.key } : {};
       } else if (props0) {
         var np = props0;
+        var ornType = ornamentFor(type);
+        if (ornType) {
+          args = Array.prototype.slice.call(args);
+          args[0] = ornType;
+          type = ornType;
+        }
+        np = headerText(type, np);
         if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
         var kind = (storage.boxy || storage.outlines) ? exemptKind(type) : null;
         if (kind === "guild" && !P().roundServers) kind = null;
@@ -710,7 +823,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v16)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v17)");
     } catch (e) {}
   }
 
@@ -775,7 +888,10 @@
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
-    var report = "system24 mobile v16 debug" +
+    var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
+    var report = "system24 mobile v17 debug" +
+      "\n\nAssets: " + (ASSET || "none") +
+      "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\n\nStyle: " + (storage.preset || "obsidian") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
@@ -817,6 +933,13 @@
             }, e(RN.View, { style: { width: 34, height: 34, borderRadius: 17, backgroundColor: shown, alignItems: "center", justifyContent: "center" } },
               c ? null : e(RN.Text, { style: { color: "#d9d3c7", fontSize: 10 } }, "auto")));
           }))
+      ),
+      e(FormSection, { title: "Ornaments" },
+        sw("ornFrames", "Claw-corner frames", "Ornate corners on cards and panels."),
+        input("frameTargets", "Frame these components (regex)", "^Card$"),
+        sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
+        sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
+        input("scaleOpacity", "Scale texture strength (0 to 1)", "0.55")
       ),
       e(FormSection, { title: "Extras" },
         sw("sectionIcons", "\u00a7 channel icons", "Grimoire theme only: replaces # with \u00a7.")
