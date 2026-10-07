@@ -1,8 +1,8 @@
 {
   "name": "system24 mobile",
-  "description": "system24-style look for Discord mobile: monospace font, boxy panels, and no Quests / Nitro / Shop upsells.",
+  "description": "Grimoire: a dark spellbook look for Discord mobile, plus no Quests, Nitro or Shop.",
   "authors": [{ "name": "system24 mobile", "id": "0" }],
   "main": "index.js",
-  "hash": "0189946fe468357311fc932cd30ef9a72b97446c9615e4a8437c00e3fa48cc1e",
+  "hash": "e657a914546d51f59aa015ba4560f24231f2c55a454dde7c37e04d998cb82ad2",
   "vendetta": { "icon": "ic_palette" }
 }

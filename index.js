@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 14;
+  var VERSION = 15;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -22,9 +22,11 @@
     hideQuests: true,
     hideUpsells: true,
     blockQuestRequests: true,
+    preset: "grimoire",
+    sectionIcons: true,
     recolor: true,
     outlines: true,
-    outlineColor: "#484848",
+    outlineColor: "#4a3a28",
     outlineWidth: "1.5",
     recolorText: false,
     extraPatterns: ""
@@ -57,6 +59,16 @@
   // system24 colors
   var BORDER = "#303030"; // --bg-1
   var BOX_RADIUS = 2;     // system24 corners are nearly square
+
+  // Looks. "grimoire" = dark spellbook: warm near-black, bone text, crimson accent, round seals.
+  var PRESETS = {
+    grimoire: { label: "Grimoire", warm: true, hue: 34, satDark: 0.2, satLight: 0.2, darken: 0.7,
+      accentHue: 2, accentSat: 0.62, accentMinL: 0.42, accentMaxL: 0.5, highlight: "tint", tint: "rgba(158,31,31,0.18)",
+      roundServers: true, sectionIcons: true, outline: "#4a3a28" },
+    system24: { label: "system24", warm: false, accentHue: 274, accentSat: 0.48, accentMinL: 0.45, accentMaxL: 0.8,
+      highlight: "outline", roundServers: false, sectionIcons: false, outline: "#484848" }
+  };
+  function P() { return PRESETS[storage.preset] || PRESETS.grimoire; }
 
   // Component names. "Quest" is case-sensitive so "Request…" never matches.
   var QUEST_RE = /(^|[^a-z])Quest(?!ion)|^OrbsBalance/;
@@ -152,6 +164,7 @@
   // and walking up its parents.
   var AVATAR_RE = /Avatar/;
   var TAG_RE = /GuildTag|ClanTag|GuildBadge|PrimaryGuild/;
+  var GUILD_RE = /GuildIcon|GuildsBarGuild|MiniGuildIcon/;
   var ownerTracking = "off";
   var RI = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
   var CI = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
@@ -166,6 +179,7 @@
     if (!name) return null;
     if (AVATAR_RE.test(name)) return "avatar";
     if (TAG_RE.test(name)) return "tag";
+    if (GUILD_RE.test(name)) return "guild";
     return null;
   }
   var ownerKind = new WeakMap();
@@ -195,6 +209,12 @@
   var COLOR_KEYS = ["backgroundColor", "color", "borderColor", "borderTopColor", "borderBottomColor",
     "borderLeftColor", "borderRightColor", "tintColor", "textDecorationColor"];
   var colorCache = new Map();
+  function resetLook() {
+    colorCache = new Map();
+    produced = new Set();
+    clearStyleCaches();
+    ownerKind = new WeakMap();
+  }
   function clearStyleCaches() {
     modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap() };
   }
@@ -258,8 +278,10 @@
     return c;
   }
 
+  var produced = new Set();
   function remapColor(c) {
     if (typeof c !== "string") return c;
+    if (produced.has(c) || produced.has(c.toLowerCase())) return c; // one of ours: never remap twice
     if (/^[a-z]+(-[a-z0-9]+)+$/.test(c)) {
       var t = remapToken(c);
       if (colorSeenCount < 400 && colorSeen[c] === undefined) { colorSeen[c] = t; colorSeenCount++; }
@@ -271,15 +293,22 @@
     var p = parseColor(c);
     if (p) {
       var hsl = toHsl(p);
-      if (hsl.d < 0.004) {
-        // already neutral grey (possibly one we produced): leave it, so layers don't stack darkening
-      } else if (hsl.d < 0.09 || hsl.s < 0.12) {
-        // tinted grey -> neutral grey at the same lightness
-        out = hslToHex(0, 0, hsl.l, p.a);
+      var pr = P();
+      if (hsl.d < 0.09 || hsl.s < 0.12) {
+        if (pr.warm) {
+          // grey -> warm sepia: dark surfaces get darker, light text becomes bone
+          var L = hsl.l;
+          if (L < 0.3) L = L * pr.darken;
+          else if (L > 0.6) L = 0.55 + (L - 0.6) * 0.65;
+          out = hslToHex(pr.hue, L < 0.5 ? pr.satDark : pr.satLight, L, p.a);
+        } else if (hsl.d >= 0.004) {
+          out = hslToHex(0, 0, hsl.l, p.a); // tinted grey -> neutral grey
+        }
       } else if (hsl.h >= 215 && hsl.h <= 250 && hsl.s > 0.35) {
-        // Discord blurple -> system24 purple (oklch 70% .12 310 = #b589d6)
-        out = hslToHex(274, Math.min(hsl.s, 0.48), Math.max(0.45, Math.min(hsl.l + 0.04, 0.8)), p.a);
+        // Discord blurple -> the preset's accent
+        out = hslToHex(pr.accentHue, Math.min(hsl.s, pr.accentSat), Math.max(pr.accentMinL, Math.min(hsl.l + 0.04, pr.accentMaxL)), p.a);
       }
+      if (out !== c) produced.add(out);
     }
     if (colorSeenCount < 400 && colorSeen[c] === undefined) { colorSeen[c] = out; colorSeenCount++; }
     colorCache.set(c, out);
@@ -328,7 +357,16 @@
           }
         }
       }
-      if (storage.boxy && mode !== "colorOnly") {
+      if (mode === "round") {
+        // seals: every rounded corner goes fully round
+        var RR = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"];
+        for (var rr = 0; rr < RR.length; rr++) {
+          if (typeof (copy || o)[RR[rr]] === "number" && (copy || o)[RR[rr]] > 0) {
+            if (!copy) { copy = {}; for (var k9 in o) copy[k9] = o[k9]; }
+            copy[RR[rr]] = 999;
+          }
+        }
+      } else if (storage.boxy && mode !== "colorOnly") {
         var src = copy || o;
         // width/height often live in a different entry of the same style array
         var w = typeof src.width === "number" ? src.width : (ctx ? ctx.w : null);
@@ -352,11 +390,16 @@
           var ow = Number(storage.outlineWidth) || 1.5;
           var hasBg = src.backgroundColor && src.backgroundColor !== "transparent";
           var isHighlight = false;
-          if (typeof src.backgroundColor === "string") {
-            var pc = parseColor(src.backgroundColor);
+          if (typeof o.backgroundColor === "string") {
+            var pc = parseColor(o.backgroundColor);
             if (pc && pc.a > 0.04 && pc.a < 0.45) { var hh = toHsl(pc); isHighlight = hh.s < 0.15; }
           }
-          if (isHighlight && src.borderWidth == null) {
+          if (isHighlight && src.borderWidth == null && P().highlight === "tint") {
+            // selected channel / pressed row: crimson wash, no box
+            if (!copy) { copy = {}; for (var k8 in o) copy[k8] = o[k8]; }
+            copy.backgroundColor = P().tint;
+            if (typeof copy.borderRadius !== "number" || copy.borderRadius > BOX_RADIUS) copy.borderRadius = BOX_RADIUS;
+          } else if (isHighlight && src.borderWidth == null) {
             // selected channel / pressed row highlight
             if (!copy) { copy = {}; for (var k6 in o) copy[k6] = o[k6]; }
             copy.borderWidth = ow;
@@ -435,12 +478,12 @@
       var tname = nameOf(type) || (typeof type === "string" ? type : "");
       if (tname && ICON_RE.test(tname)) {
         scoutIconProps(tname, props);
-        if (storage.boxy && mode !== "colorOnly") {
+        if ((storage.boxy || mode === "round") && mode !== "colorOnly") {
           for (var pk in props) {
             var pv = props[pk];
             if (/radius/i.test(pk) && typeof pv === "number" && pv > BOX_RADIUS && pv < 100) {
               if (!out) { out = {}; for (var c0 in props) out[c0] = props[c0]; }
-              out[pk] = BOX_RADIUS;
+              out[pk] = mode === "round" ? 999 : BOX_RADIUS;
             }
           }
         }
@@ -466,6 +509,18 @@
   function Hidden() { return null; }
   Hidden.displayName = "System24Hidden";
 
+  // Grimoire: the # channel icon becomes an italic section mark.
+  var SECTION_RE = /^(TextIcon|TextLockIcon)$/;
+  var SECTION_SIZES = { xxs: 12, xs: 14, sm: 16, md: 20, lg: 24, custom: 20 };
+  function SectionIcon(props) {
+    var px = typeof props.size === "number" ? props.size : (SECTION_SIZES[props.size] || 20);
+    return React.createElement(Text, {
+      style: [props.style, { fontFamily: "serif", fontStyle: "italic", fontSize: Math.round(px * 1.05),
+        lineHeight: Math.round(px * 1.2), width: px, textAlign: "center", color: "#a08a62" }]
+    }, "\u00a7");
+  }
+  SectionIcon.displayName = "GrimoireSectionIcon";
+
   // Wraps jsx / jsxs / createElement: blank out hidden components, restyle Text.
   function elementHook(args, orig) {
     try {
@@ -483,7 +538,11 @@
         (storage.hideUpsells && UPSELL_LABEL_RE.test(lbl))
       );
       if (hideByLabel) hidden.add((nameOf(type) || "?") + "[" + lbl + "]");
-      if (hideByLabel || shouldHide(type)) {
+      if (storage.sectionIcons && P().sectionIcons && props0 && SECTION_RE.test(nameOf(type))) {
+        args = Array.prototype.slice.call(args);
+        args[0] = SectionIcon;
+        args[1] = { size: props0.size, style: props0.style, key: props0.key };
+      } else if (hideByLabel || shouldHide(type)) {
         args = Array.prototype.slice.call(args);
         var p = args[1] || {};
         args[0] = Hidden;
@@ -492,7 +551,8 @@
         var np = props0;
         if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
         var kind = (storage.boxy || storage.outlines) ? exemptKind(type) : null;
-        np = styleProps(np, type, kind === "avatar" ? "colorOnly" : kind === "tag" ? "noOutline" : "full");
+        if (kind === "guild" && !P().roundServers) kind = null;
+        np = styleProps(np, type, kind === "avatar" ? "colorOnly" : kind === "tag" ? "noOutline" : kind === "guild" ? "round" : "full");
         if (np !== props0) {
           args = Array.prototype.slice.call(args);
           args[1] = np;
@@ -606,7 +666,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "system24 mobile v14 loaded");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Grimoire loaded (v15)");
     } catch (e) {}
   }
 
@@ -670,8 +730,8 @@
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
-    var report = "system24 mobile v14 debug" +
-      "\n\nOwner tracking: " + ownerTracking +
+    var report = "system24 mobile v15 debug" +
+      "\n\nStyle: " + (storage.preset || "grimoire") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
@@ -686,6 +746,14 @@
       "\n\nNot hidden but looks related: " + (candList.join(", ") || "none");
 
     return e(RN.ScrollView, { style: { flex: 1 } },
+      e(FormSection, { title: "Style" },
+        Object.keys(PRESETS).map(function (id) {
+          var on = (storage.preset || "grimoire") === id;
+          return row("preset-" + id, (on ? "\u25C6 " : "\u25C7 ") + PRESETS[id].label, on ? "Active" : "Tap to switch",
+            function () { storage.preset = id; storage.outlineColor = PRESETS[id].outline; resetLook(); refresh(); });
+        }),
+        sw("sectionIcons", "\u00a7 channel icons", "Grimoire only: replaces # with \u00a7.")
+      ),
       e(FormSection, { title: "Look" },
         sw("monoFont", "Force monospace font (fallback)", "Prefer the DM Mono font pack in Kettu > Fonts. Use this only if that doesn't work."),
         input("fontFamily", "Font family", "monospace"),
