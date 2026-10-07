@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 19;
+  var VERSION = 20;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -31,6 +31,7 @@
     frameTargets: "^Card$",
     autoFrames: true,
     ornPlates: true,
+    plateFade: true,
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
     recolor: true,
@@ -586,6 +587,9 @@
 
   // The wrapped original is created with this flag on, so it is never wrapped again (no loop).
   var creatingInner = false;
+  // While building our own ornament pieces, the hook leaves them exactly as written.
+  var rawDepth = 0;
+  function raw(fn) { rawDepth++; try { return fn(); } finally { rawDepth--; } }
   function innerEl(orig, props, ref) {
     creatingInner = true;
     try { return React.createElement(orig, Object.assign({}, props, { ref: ref })); }
@@ -607,11 +611,18 @@
           return e(Image, { key: k, source: src, pointerEvents: "none",
             style: Object.assign({ position: "absolute", width: sz, height: sz, zIndex: 2, transform: tf }, pos) });
         };
-        return e(React.Fragment, null, innerEl(orig, props, ref),
+        scoutPlate();
+        var fill = { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 };
+        var inner = innerEl(orig, props, ref);
+        return raw(function () { return e(React.Fragment, null, inner,
+          storage.plateFade ? e(Image, { key: "fade", source: { uri: ASSET + "fade.png" }, resizeMode: "stretch", pointerEvents: "none",
+            style: Object.assign({ width: undefined, height: undefined, borderRadius: boxR() }, fill) }) : null,
+          e(View, { key: "edge", pointerEvents: "none",
+            style: Object.assign({ borderWidth: 1, borderColor: accentFor(false), borderRadius: boxR() }, fill) }),
           c("tl", { top: o, left: o }, []),
           c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
           c("bl", { bottom: o, left: o }, [{ scaleY: -1 }]),
-          c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }]));
+          c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }])); });
       });
     } else if (kind === "frame") {
       w = React.forwardRef(function (props, ref) {
@@ -644,6 +655,27 @@
     w.displayName = "Orn_" + kind + "_" + (nameOf(orig) || "x");
     cache.set(orig, w);
     return w;
+  }
+
+  // Scouting for the banner-strip account card.
+  var plateOwners = {};
+  function scoutPlate() {
+    try {
+      var ch = ownerChain().split("|").slice(0, 4).join(" < ");
+      if (ch) plateOwners[ch] = (plateOwners[ch] || 0) + 1;
+    } catch (e) {}
+  }
+  function bannerInfo() {
+    try {
+      var US = metro.findByStoreName && metro.findByStoreName("UserStore");
+      var me = US && US.getCurrentUser && US.getCurrentUser();
+      if (!me) return "no current user";
+      var PS = metro.findByStoreName && metro.findByStoreName("UserProfileStore");
+      var prof = PS && PS.getUserProfile && PS.getUserProfile(me.id);
+      var hash = (prof && prof.banner) || me.banner;
+      if (!hash) return "user found, no banner hash (profile " + (prof ? "loaded" : "not loaded") + ")";
+      return "https://cdn.discordapp.com/banners/" + me.id + "/" + hash + (String(hash).indexOf("a_") === 0 ? ".gif" : ".png") + "?size=600";
+    } catch (e) { return "error: " + (e && e.message); }
   }
 
   var frameRe = null, frameSrc = null;
@@ -693,7 +725,8 @@
     var pad = Math.max(num(f.padding), num(f.paddingHorizontal), num(f.paddingVertical), num(f.paddingTop), num(f.paddingLeft));
     return pad >= 10 || num(f.minHeight) >= 56 || num(f.height) >= 56;
   }
-  function cornerEls() {
+  function cornerEls() { return raw(cornerEls2); }
+  function cornerEls2() {
     var e = React.createElement, sz = 20, o = -3, src = { uri: ASSET + "corner.png" };
     var c = function (k, pos, tf) {
       return e(Image, { key: "orn-" + k, source: src, pointerEvents: "none",
@@ -730,6 +763,7 @@
 
   // Wraps jsx / jsxs / createElement: blank out hidden components, restyle Text.
   function elementHook(args, orig) {
+    if (rawDepth > 0) return orig.apply(this, args);
     try {
       var type = args[0];
       var props0 = args[1];
@@ -898,7 +932,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v19)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v20)");
     } catch (e) {}
   }
 
@@ -964,9 +998,11 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v19 debug" +
+    var report = "system24 mobile v20 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
+      "\nNameplate owners: " + (Object.keys(plateOwners).map(function (k) { return k + " x" + plateOwners[k]; }).join(" | ") || "none yet") +
+      "\nBanner: " + bannerInfo() +
       "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
       "\n\nStyle: " + (storage.preset || "obsidian") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
@@ -1012,6 +1048,7 @@
       ),
       e(FormSection, { title: "Ornaments" },
         sw("ornFrames", "Claw-corner frames", "Ornate corners on cards and panels."),
+        sw("plateFade", "Fade nameplates", "Darkens nameplate art on the left so names stay readable."),
         sw("ornPlates", "Frame nameplates", "Claw corners on nameplates (the art behind names in your account bar and member lists)."),
         sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
