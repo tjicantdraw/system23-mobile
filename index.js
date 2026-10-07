@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 34;
+  var VERSION = 35;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -418,6 +418,7 @@
 
   // mode: "full" | "noOutline" (server tags) | "colorOnly" (avatars)
   var modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap(), round: new WeakMap() };
+  var HL_RE = /Channel|PressableHighlight/, curTypeName = "", hlOwners = {};
   function remapObject(o, mode, ctx) {
     mode = mode || "full";
     // "<mode>|v": a component's own style prop. Only change values that already exist, never add
@@ -425,6 +426,19 @@
     var valuesOnly = mode.slice(-2) === "|v";
     if (valuesOnly) {
       var bm = mode.slice(0, -2);
+      // Channel rows carry the selected-channel highlight on the component itself, so they may keep
+      // the full highlight (fill + left bar). Everything else stays values-only.
+      if (bm === "full" && HL_RE.test(curTypeName)) {
+        var hb = remapObject(o, "full", ctx);
+        if (hb !== o && hb.borderLeftWidth != null && o.borderLeftWidth == null) {
+          hlOwners[curTypeName] = (hlOwners[curTypeName] || 0) + 1;
+          var ho = {};
+          for (var hk in o) ho[hk] = hk in hb ? hb[hk] : o[hk];
+          ho.backgroundColor = hb.backgroundColor; ho.borderLeftWidth = hb.borderLeftWidth; ho.borderLeftColor = hb.borderLeftColor;
+          if (hb.borderRadius != null) ho.borderRadius = hb.borderRadius;
+          return ho;
+        }
+      }
       // outlines and highlights are left for the native view underneath (which sees the original colors)
       var base = remapObject(o, bm === "full" ? "plain" : bm, ctx);
       if (base === o) return o;
@@ -600,6 +614,7 @@
       }
       if (props.style) {
         // Native views (string types) get the full treatment; components only get value changes.
+        curTypeName = tname;
         var ns = remapStyle(props.style, 0, typeof type === "string" ? mode : mode + "|v", null);
         if (ns !== props.style) { if (!out) { out = {}; for (var k in props) out[k] = props[k]; } out.style = ns; }
       }
@@ -1123,7 +1138,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v34)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v35)");
     } catch (e) {}
   }
 
@@ -1189,13 +1204,14 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v34 debug" +
+    var report = "system24 mobile v35 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
       "\nPlate/panel-like components: " + (Object.keys(plateNames).map(function (k) { return k + " x" + plateNames[k]; }).join(", ") || "none") +
       "\nNameplate owners: " + (Object.keys(plateOwners).map(function (k) { return k + " x" + plateOwners[k]; }).join(" | ") || "none yet") +
       "\nBanner: " + bannerInfo() +
+      "\nHighlights on: " + (Object.keys(hlOwners).map(function (k) { return k + " x" + hlOwners[k]; }).join(", ") || "none yet") +
       "\nChat background: list seen x" + chatHits + ", color " + (chatColor || "none") +
       "\nChat/message components: " + (Object.keys(chatNames).sort(function (a, b) { return chatNames[b] - chatNames[a]; }).slice(0, 40).map(function (k) { return k + " x" + chatNames[k]; }).join(", ") || "none yet") +
       "\nAuto-framed (by component): " + (Object.keys(autoFrameOwners).map(function (k) { return k + " x" + autoFrameOwners[k]; }).join(", ") || "none yet") +
