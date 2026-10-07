@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 21;
+  var VERSION = 22;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -32,6 +32,8 @@
     autoFrames: true,
     ornPlates: true,
     plateFade: true,
+    acctBanner: true,
+    bannerHeight: "64",
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
     recolor: true,
@@ -247,7 +249,7 @@
     var k = kindOf(nameOf(type));
     if (k) return k;
     var tg = currentTag();
-    if (tg && tg !== "category") { ownerTracking = "render tags"; return tg; }
+    if (tg && tg !== "category" && tg !== "youbar") { ownerTracking = "render tags"; return tg; }
     var f = currentOwner();
     if (!f) return null;
     ownerTracking = "on";
@@ -631,12 +633,13 @@
   }
 
   // forwardRef wrappers keep Discord's refs (list scrolling etc.) working.
-  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap(), plate: new WeakMap() };
+  var wrapCache = { frame: new WeakMap(), star: new WeakMap(), scales: new WeakMap(), plate: new WeakMap(), plateBar: new WeakMap(), banner: new WeakMap() };
   function wrapperFor(kind, orig) {
     var cache = wrapCache[kind], w = cache.get(orig);
     if (w) return w;
     var e = React.createElement;
-    if (kind === "plate") {
+    if (kind === "plate" || kind === "plateBar") {
+      var barMode = kind === "plateBar";
       // Nameplates fill their row, so the corners go NEXT to them (a fragment) and pin to the row's
       // corners. This leaves the nameplate's own layout untouched.
       w = React.forwardRef(function (props, ref) {
@@ -653,10 +656,28 @@
             style: Object.assign({ width: undefined, height: undefined, borderRadius: boxR() }, fill) }) : null,
           e(View, { key: "edge", pointerEvents: "none",
             style: Object.assign({ borderWidth: 1, borderColor: accentFor(false), borderRadius: boxR() }, fill) }),
-          c("tl", { top: o, left: o }, []),
-          c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
+          barMode && bannerUrl() ? null : c("tl", { top: o, left: o }, []),
+          barMode && bannerUrl() ? null : c("tr", { top: o, right: o }, [{ scaleX: -1 }]),
           c("bl", { bottom: o, left: o }, [{ scaleY: -1 }]),
           c("br", { bottom: o, right: o }, [{ scaleX: -1 }, { scaleY: -1 }])); });
+      });
+    } else if (kind === "banner") {
+      w = React.forwardRef(function (props, ref) {
+        var inner = innerEl(orig, props, ref);
+        var url = bannerUrl();
+        if (!url) return inner;
+        var bh = Number(storage.bannerHeight) || 64, r = boxR(), edge = accentFor(false);
+        var src = { uri: ASSET + "corner.png" };
+        return raw(function () {
+          return e(React.Fragment, null, inner,
+            e(View, { key: "banner", pointerEvents: "none",
+              style: { position: "absolute", left: 0, right: 0, top: -bh, height: bh + 2, borderTopLeftRadius: r, borderTopRightRadius: r,
+                overflow: "hidden", borderWidth: 1, borderBottomWidth: 0, borderColor: edge, backgroundColor: "#0b0c0d" } },
+              e(Image, { source: { uri: url }, resizeMode: "cover", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined } }),
+              e(Image, { source: { uri: ASSET + "fadev.png" }, resizeMode: "stretch", style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, width: undefined, height: undefined } })),
+            e(Image, { key: "btl", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, left: -3, width: 22, height: 22, zIndex: 3 } }),
+            e(Image, { key: "btr", source: src, pointerEvents: "none", style: { position: "absolute", top: -bh - 3, right: -3, width: 22, height: 22, zIndex: 3, transform: [{ scaleX: -1 }] } }));
+        });
       });
     } else if (kind === "frame") {
       w = React.forwardRef(function (props, ref) {
@@ -725,6 +746,16 @@
       if (ch) plateOwners[ch] = (plateOwners[ch] || 0) + 1;
     } catch (e) {}
   }
+  var bannerCache = { url: null, at: 0 };
+  function bannerUrl() {
+    if (!storage.acctBanner) return null;
+    var now = Date.now();
+    if (now - bannerCache.at > 120000) {
+      var info = bannerInfo();
+      bannerCache = { url: /^https:/.test(info) ? info : null, at: now };
+    }
+    return bannerCache.url;
+  }
   function bannerInfo() {
     try {
       var US = metro.findByStoreName && metro.findByStoreName("UserStore");
@@ -750,7 +781,12 @@
     if (!ASSET || creatingInner) return null;
     var n = nameOf(type);
     if (!n || /^Orn_/.test(n)) return null;
-    if (storage.ornFrames && storage.ornPlates && n === "Nameplate") { countOrn("plate"); return wrapperFor("plate", type); }
+    if (storage.acctBanner && n === "YouBarBackground") { countOrn("banner"); return wrapperFor("banner", type); }
+    if (storage.ornFrames && storage.ornPlates && n === "Nameplate") {
+      var inBar = currentTag() === "youbar";
+      countOrn(inBar ? "plateBar" : "plate");
+      return wrapperFor(inBar ? "plateBar" : "plate", type);
+    }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
     if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
     if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
@@ -852,7 +888,7 @@
       } else if (props0) {
         var np = props0;
         var tname = nameOf(type);
-        var tkind = kindOf(tname) || (tname === "CategoryChannel" && !storage.ornStars ? "category" : null);
+        var tkind = kindOf(tname) || (tname === "YouBarNameplate" ? "youbar" : null);
         if (tkind && typeof type !== "string" && !tagWrappers.has(type)) {
           var tw = tagWrapped(type, tkind);
           if (tw !== type) { args = Array.prototype.slice.call(args); args[0] = tw; }
@@ -864,6 +900,9 @@
           type = ornType;
         }
         np = headerText(type, np);
+        if (P().roundServers && tname === "GuildsBarAnimatedItemWrapper" && np.circle === false) {
+          np = Object.assign({}, np, { circle: true });
+        }
         if (type === Text || (typeof props0.variant === "string" && VARIANT_RE.test(props0.variant))) np = monoProps(np);
         var kind = (storage.boxy || storage.outlines) ? exemptKind(type) : null;
         if (kind === "guild" && !P().roundServers) kind = null;
@@ -999,7 +1038,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v21)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v22)");
     } catch (e) {}
   }
 
@@ -1065,7 +1104,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v21 debug" +
+    var report = "system24 mobile v22 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
@@ -1117,6 +1156,8 @@
       ),
       e(FormSection, { title: "Ornaments" },
         sw("ornFrames", "Claw-corner frames", "Ornate corners on cards and panels."),
+        sw("acctBanner", "Banner on account bar", "Your profile banner rises above the account bar."),
+        input("bannerHeight", "Banner height", "64"),
         sw("plateFade", "Fade nameplates", "Darkens nameplate art on the left so names stay readable."),
         sw("ornPlates", "Frame nameplates", "Claw corners on nameplates (the art behind names in your account bar and member lists)."),
         sw("autoFrames", "Frame all panels (auto)", "Corners on every solid rounded box, like profile cards and embeds."),
