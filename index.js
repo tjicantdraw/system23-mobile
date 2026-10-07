@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 15;
+  var VERSION = 16;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -22,11 +22,12 @@
     hideQuests: true,
     hideUpsells: true,
     blockQuestRequests: true,
-    preset: "grimoire",
+    preset: "obsidian",
+    accentOverride: "",
     sectionIcons: true,
     recolor: true,
     outlines: true,
-    outlineColor: "#4a3a28",
+    outlineColor: "#3a1418",
     outlineWidth: "1.5",
     recolorText: false,
     extraPatterns: ""
@@ -60,15 +61,33 @@
   var BORDER = "#303030"; // --bg-1
   var BOX_RADIUS = 2;     // system24 corners are nearly square
 
-  // Looks. "grimoire" = dark spellbook: warm near-black, bone text, crimson accent, round seals.
+  // Looks. Grey handling: dark surfaces (L<0.3) are multiplied by `darken`; light text is
+  // compressed toward bone. tintSat null = keep Discord's own tint. accent / accentLight replace
+  // Discord's blurple (dark uses / bright uses).
   var PRESETS = {
-    grimoire: { label: "Grimoire", warm: true, hue: 34, satDark: 0.2, satLight: 0.2, darken: 0.7,
-      accentHue: 2, accentSat: 0.62, accentMinL: 0.42, accentMaxL: 0.5, highlight: "tint", tint: "rgba(158,31,31,0.18)",
-      roundServers: true, sectionIcons: true, outline: "#4a3a28" },
-    system24: { label: "system24", warm: false, accentHue: 274, accentSat: 0.48, accentMinL: 0.45, accentMaxL: 0.8,
-      highlight: "outline", roundServers: false, sectionIcons: false, outline: "#484848" }
+    obsidian: { label: "Obsidian", tintHue: null, tintSat: null, darken: 0.8, textHue: 40, textSat: 0.14, compress: true,
+      accent: "#a1111a", accentLight: "#ff5a36", highlight: "fill", fill: "#4a0d12", bar: "#e0283a",
+      roundServers: true, ring: "#a1111a", sectionIcons: false, outline: "#3a1418", radius: 6,
+      swatch: ["#080b0c", "#1a1a1e", "#a1111a"] },
+    ashen: { label: "Ashen", tintHue: 0, tintSat: 0, darken: 0.95, textHue: 30, textSat: 0.08, compress: true,
+      accent: "#b8401f", accentLight: "#ff5a36", highlight: "fill", fill: "#3a2018", bar: "#ff5a36",
+      roundServers: true, ring: "#6b6b70", sectionIcons: false, outline: "#3a3a40", radius: 6,
+      swatch: ["#151515", "#2a2a2c", "#ff5a36"] },
+    bloodmoon: { label: "Bloodmoon", tintHue: 356, tintSat: 0.32, darken: 0.75, textHue: 20, textSat: 0.15, compress: true,
+      accent: "#a1111a", accentLight: "#ff4a4a", highlight: "fill", fill: "#5a0d14", bar: "#ff3b4a",
+      roundServers: true, ring: "#c0202e", sectionIcons: false, outline: "#5a1820", radius: 6,
+      swatch: ["#140607", "#2a0c10", "#e0283a"] },
+    grimoire: { label: "Grimoire", tintHue: 34, tintSat: 0.2, darken: 0.7, textHue: 34, textSat: 0.2, compress: true,
+      accent: "#9e1f1f", accentLight: "#cf3630", highlight: "tint", tint: "rgba(158,31,31,0.18)",
+      roundServers: true, ring: null, sectionIcons: true, outline: "#4a3a28", radius: 2,
+      swatch: ["#080706", "#100d0a", "#9e1f1f"] },
+    system24: { label: "system24", tintHue: 0, tintSat: 0, darken: 1, textHue: 0, textSat: 0, compress: false,
+      accent: "#b589d6", accentLight: "#b589d6", highlight: "outline",
+      roundServers: false, ring: null, sectionIcons: false, outline: "#484848", radius: 2,
+      swatch: ["#141414", "#262626", "#b589d6"] }
   };
-  function P() { return PRESETS[storage.preset] || PRESETS.grimoire; }
+  function P() { return PRESETS[storage.preset] || PRESETS.obsidian; }
+  function boxR() { var r = P().radius; return typeof r === "number" ? r : 2; }
 
   // Component names. "Quest" is case-sensitive so "Request…" never matches.
   var QUEST_RE = /(^|[^a-z])Quest(?!ion)|^OrbsBalance/;
@@ -216,7 +235,7 @@
     ownerKind = new WeakMap();
   }
   function clearStyleCaches() {
-    modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap() };
+    modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap(), round: new WeakMap() };
   }
   var colorSeen = {};
   var colorSeenCount = 0;
@@ -279,6 +298,18 @@
   }
 
   var produced = new Set();
+  function accentFor(light) {
+    var ov = String(storage.accentOverride || "");
+    if (/^#[0-9a-f]{6}$/i.test(ov)) {
+      if (!light) return ov.toLowerCase();
+      var h = toHsl(parseColor(ov));
+      return hslToHex(h.h, h.s, Math.max(h.l, 0.6), 1);
+    }
+    return light ? P().accentLight : P().accent;
+  }
+  function withAlpha(hex, a) {
+    return a < 1 ? hex + ("0" + Math.round(a * 255).toString(16)).slice(-2) : hex;
+  }
   function remapColor(c) {
     if (typeof c !== "string") return c;
     if (produced.has(c) || produced.has(c.toLowerCase())) return c; // one of ours: never remap twice
@@ -295,18 +326,17 @@
       var hsl = toHsl(p);
       var pr = P();
       if (hsl.d < 0.09 || hsl.s < 0.12) {
-        if (pr.warm) {
-          // grey -> warm sepia: dark surfaces get darker, light text becomes bone
-          var L = hsl.l;
-          if (L < 0.3) L = L * pr.darken;
-          else if (L > 0.6) L = 0.55 + (L - 0.6) * 0.65;
-          out = hslToHex(pr.hue, L < 0.5 ? pr.satDark : pr.satLight, L, p.a);
-        } else if (hsl.d >= 0.004) {
-          out = hslToHex(0, 0, hsl.l, p.a); // tinted grey -> neutral grey
-        }
+        var L = hsl.l;
+        if (L < 0.3) L = L * pr.darken;
+        else if (L > 0.6 && pr.compress) L = 0.55 + (L - 0.6) * 0.65;
+        var dark = L < 0.5;
+        var gh = dark ? pr.tintHue : pr.textHue, gs = dark ? pr.tintSat : pr.textSat;
+        if (gh === null) { gh = hsl.h; gs = hsl.s; }
+        out = hslToHex(gh, gs, L, p.a);
+        if (out.slice(0, 7) === c.toLowerCase().slice(0, 7) && p.a === 1) out = c;
       } else if (hsl.h >= 215 && hsl.h <= 250 && hsl.s > 0.35) {
-        // Discord blurple -> the preset's accent
-        out = hslToHex(pr.accentHue, Math.min(hsl.s, pr.accentSat), Math.max(pr.accentMinL, Math.min(hsl.l + 0.04, pr.accentMaxL)), p.a);
+        // Discord blurple -> the theme's accent (bright uses get the lighter accent)
+        out = withAlpha(accentFor(hsl.l >= 0.7), p.a);
       }
       if (out !== c) produced.add(out);
     }
@@ -338,12 +368,12 @@
   }
 
   // mode: "full" | "noOutline" (server tags) | "colorOnly" (avatars)
-  var modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap() };
+  var modeCaches = { full: new WeakMap(), noOutline: new WeakMap(), colorOnly: new WeakMap(), round: new WeakMap() };
   function remapObject(o, mode, ctx) {
     mode = mode || "full";
     // only cache when the result can't depend on sibling styles
     var cacheable = !ctx;
-    var cache = modeCaches[mode];
+    var cache = modeCaches[mode] || (modeCaches[mode] = new WeakMap());
     if (cacheable) { var cached = cache.get(o); if (cached) return cached; }
     var out = o;
     if (isPlainStyle(o)) {
@@ -366,6 +396,13 @@
             copy[RR[rr]] = 999;
           }
         }
+        var rsrc = copy || o, rw = typeof rsrc.width === "number" ? rsrc.width : (ctx ? ctx.w : null);
+        var rh = typeof rsrc.height === "number" ? rsrc.height : (ctx ? ctx.h : null);
+        if (P().ring && rw != null && rw === rh && rw >= 30 && rsrc.borderWidth == null && typeof o.width === "number") {
+          if (!copy) { copy = {}; for (var k11 in o) copy[k11] = o[k11]; }
+          copy.borderWidth = 1.5;
+          copy.borderColor = P().ring;
+        }
       } else if (storage.boxy && mode !== "colorOnly") {
         var src = copy || o;
         // width/height often live in a different entry of the same style array
@@ -377,12 +414,12 @@
         var squared = false;
         for (var ri = 0; ri < RADII.length; ri++) {
           var rk = RADII[ri], rv = src[rk];
-          if (typeof rv !== "number" || rv <= BOX_RADIUS) continue;
+          if (typeof rv !== "number" || rv <= boxR()) continue;
           // keep true circles round (avatars, status dots): radius at least half the size, or a "999" style radius
           if (half != null && rv >= half - 1 && w === h) continue;
           if (rv >= 100) continue;
           if (!copy) { copy = {}; for (var k2 in o) copy[k2] = o[k2]; }
-          copy[rk] = BOX_RADIUS;
+          copy[rk] = boxR();
           squared = true;
         }
         if (storage.outlines && mode === "full") {
@@ -394,17 +431,24 @@
             var pc = parseColor(o.backgroundColor);
             if (pc && pc.a > 0.04 && pc.a < 0.45) { var hh = toHsl(pc); isHighlight = hh.s < 0.15; }
           }
-          if (isHighlight && src.borderWidth == null && P().highlight === "tint") {
+          if (isHighlight && src.borderWidth == null && P().highlight === "fill") {
+            // selected channel / pressed row: scarlet fill with a bright bar on the left
+            if (!copy) { copy = {}; for (var k10 in o) copy[k10] = o[k10]; }
+            copy.backgroundColor = P().fill;
+            copy.borderLeftWidth = 3;
+            copy.borderLeftColor = /^#[0-9a-f]{6}$/i.test(String(storage.accentOverride || "")) ? accentFor(true) : P().bar;
+            if (typeof copy.borderRadius !== "number" || copy.borderRadius > boxR()) copy.borderRadius = boxR();
+          } else if (isHighlight && src.borderWidth == null && P().highlight === "tint") {
             // selected channel / pressed row: crimson wash, no box
             if (!copy) { copy = {}; for (var k8 in o) copy[k8] = o[k8]; }
             copy.backgroundColor = P().tint;
-            if (typeof copy.borderRadius !== "number" || copy.borderRadius > BOX_RADIUS) copy.borderRadius = BOX_RADIUS;
+            if (typeof copy.borderRadius !== "number" || copy.borderRadius > boxR()) copy.borderRadius = boxR();
           } else if (isHighlight && src.borderWidth == null) {
             // selected channel / pressed row highlight
             if (!copy) { copy = {}; for (var k6 in o) copy[k6] = o[k6]; }
             copy.borderWidth = ow;
             copy.borderColor = oc;
-            if (typeof copy.borderRadius !== "number" || copy.borderRadius > BOX_RADIUS) copy.borderRadius = BOX_RADIUS;
+            if (typeof copy.borderRadius !== "number" || copy.borderRadius > boxR()) copy.borderRadius = boxR();
           } else if (squared && hasBg && src.borderWidth == null) {
             // system24-style outline on boxed panels, cards, inputs and buttons
             if (!copy) { copy = {}; for (var k4 in o) copy[k4] = o[k4]; }
@@ -481,9 +525,9 @@
         if ((storage.boxy || mode === "round") && mode !== "colorOnly") {
           for (var pk in props) {
             var pv = props[pk];
-            if (/radius/i.test(pk) && typeof pv === "number" && pv > BOX_RADIUS && pv < 100) {
+            if (/radius/i.test(pk) && typeof pv === "number" && pv > boxR() && pv < 100) {
               if (!out) { out = {}; for (var c0 in props) out[c0] = props[c0]; }
-              out[pk] = mode === "round" ? 999 : BOX_RADIUS;
+              out[pk] = mode === "round" ? 999 : boxR();
             }
           }
         }
@@ -666,7 +710,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Grimoire loaded (v15)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v16)");
     } catch (e) {}
   }
 
@@ -685,6 +729,7 @@
     var refresh = function () { forceState[1](function (n) { return n + 1; }); };
 
     var Forms = (vendetta.ui.components && vendetta.ui.components.Forms) || {};
+    var Press = RN.Pressable || RN.TouchableOpacity;
     var FormSection = Forms.FormSection || RN.View;
     var FormSwitchRow = Forms.FormSwitchRow;
     var FormRow = Forms.FormRow;
@@ -730,8 +775,8 @@
     var labelList = Object.keys(labelHits);
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
-    var report = "system24 mobile v15 debug" +
-      "\n\nStyle: " + (storage.preset || "grimoire") + "\nOwner tracking: " + ownerTracking +
+    var report = "system24 mobile v16 debug" +
+      "\n\nStyle: " + (storage.preset || "obsidian") + "\nOwner tracking: " + ownerTracking +
       "\n\nIcon components: " + (iconList.join(" | ") || "none") +
       "\n\nColors seen: " + (colorList.join(", ") || "none") +
       "\n\nLabelled items seen: " + (labelList.join(", ") || "none") +
@@ -746,19 +791,41 @@
       "\n\nNot hidden but looks related: " + (candList.join(", ") || "none");
 
     return e(RN.ScrollView, { style: { flex: 1 } },
-      e(FormSection, { title: "Style" },
-        Object.keys(PRESETS).map(function (id) {
-          var on = (storage.preset || "grimoire") === id;
-          return row("preset-" + id, (on ? "\u25C6 " : "\u25C7 ") + PRESETS[id].label, on ? "Active" : "Tap to switch",
-            function () { storage.preset = id; storage.outlineColor = PRESETS[id].outline; resetLook(); refresh(); });
-        }),
-        sw("sectionIcons", "\u00a7 channel icons", "Grimoire only: replaces # with \u00a7.")
+      e(FormSection, { title: "Theme" },
+        e(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", gap: 10, padding: 12 } },
+          Object.keys(PRESETS).map(function (id) {
+            var pr = PRESETS[id], on = (storage.preset || "obsidian") === id;
+            return e(Press, {
+              key: id, accessibilityRole: "button", accessibilityLabel: pr.label + " theme",
+              onPress: function () { storage.preset = id; storage.outlineColor = pr.outline; resetLook(); refresh(); },
+              style: { width: 100, borderWidth: on ? 2 : 1, borderColor: on ? accentFor(true) : "#2e2f36", borderRadius: 8, overflow: "hidden", backgroundColor: "#0e1011" }
+            },
+              e(RN.View, { style: { height: 56, flexDirection: "row" } },
+                pr.swatch.map(function (c, i) { return e(RN.View, { key: i, style: { flex: i === 2 ? 0.5 : 1, backgroundColor: c } }); })),
+              e(RN.Text, { style: { color: on ? "#d9d3c7" : "#9a958c", fontSize: 13, padding: 8, fontWeight: on ? "700" : "400" } }, (on ? "\u2713 " : "") + pr.label));
+          }))
+      ),
+      e(FormSection, { title: "Accent color" },
+        e(RN.View, { style: { flexDirection: "row", flexWrap: "wrap", gap: 12, padding: 12 } },
+          ["", "#a1111a", "#ff5a36", "#d4af37", "#d9d3c7", "#8e1b1b", "#6b6b70"].map(function (c) {
+            var on = String(storage.accentOverride || "") === c;
+            var shown = c || P().accent;
+            return e(Press, {
+              key: c || "theme", accessibilityRole: "button", accessibilityLabel: c ? "Accent " + c : "Theme default accent",
+              onPress: function () { storage.accentOverride = c; resetLook(); refresh(); },
+              style: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", borderWidth: on ? 2 : 0, borderColor: "#d9d3c7" }
+            }, e(RN.View, { style: { width: 34, height: 34, borderRadius: 17, backgroundColor: shown, alignItems: "center", justifyContent: "center" } },
+              c ? null : e(RN.Text, { style: { color: "#d9d3c7", fontSize: 10 } }, "auto")));
+          }))
+      ),
+      e(FormSection, { title: "Extras" },
+        sw("sectionIcons", "\u00a7 channel icons", "Grimoire theme only: replaces # with \u00a7.")
       ),
       e(FormSection, { title: "Look" },
         sw("monoFont", "Force monospace font (fallback)", "Prefer the DM Mono font pack in Kettu > Fonts. Use this only if that doesn't work."),
         input("fontFamily", "Font family", "monospace"),
         input("letterSpacing", "Letter spacing", "-0.3"),
-        sw("recolor", "system24 colors", "Neutral greys and purple accent, applied by the plugin."),
+        sw("recolor", "Theme colors", "Recolor Discord with the selected theme."),
         sw("boxy", "Boxy panels", "Square corners on cards, inputs, buttons and images."),
         sw("outlines", "Outlines", "system24-style outlines on boxes, and matching divider lines."),
         input("outlineColor", "Outline color", "#484848", function () { clearStyleCaches(); }),

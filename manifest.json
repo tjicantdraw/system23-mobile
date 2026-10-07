@@ -1,8 +1,8 @@
 {
   "name": "system24 mobile",
-  "description": "Grimoire: a dark spellbook look for Discord mobile, plus no Quests, Nitro or Shop.",
+  "description": "Dark fantasy themes for Discord mobile (Obsidian, Ashen, Bloodmoon, Grimoire), plus no Quests, Nitro or Shop.",
   "authors": [{ "name": "system24 mobile", "id": "0" }],
   "main": "index.js",
-  "hash": "e657a914546d51f59aa015ba4560f24231f2c55a454dde7c37e04d998cb82ad2",
+  "hash": "46c49489e4e2ba68464e1e94841914f9afe07e4f883bc5b3ee2c0e0d8c787522",
   "vendetta": { "icon": "ic_palette" }
 }
