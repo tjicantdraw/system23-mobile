@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 26;
+  var VERSION = 27;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -713,9 +713,10 @@
         var op = Number(storage.scaleOpacity);
         var inner = innerEl(orig, props, ref);
         return raw(function () {
-          return e(React.Fragment, null, inner,
+          return e(React.Fragment, null,
             decoImg({ key: "scales", source: { uri: ASSET + "scales.png" }, resizeMode: "repeat", pointerEvents: "none",
-              style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: isNaN(op) ? 0.8 : op } }));
+              style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, opacity: isNaN(op) ? 0.8 : op } }),
+            inner);
         });
       });
     }
@@ -801,7 +802,7 @@
       return wrapperFor(inBar ? "plateBar" : "plate", type);
     }
     if (storage.ornStars && n === "CategoryChannel") { countOrn("star"); return wrapperFor("star", type); }
-    if (storage.ornScales && n === "ChannelListPanelBackdrop") { countOrn("scales"); return wrapperFor("scales", type); }
+    if (storage.ornScales && n === "FastList") { countOrn("scales"); return wrapperFor("scales", type); }
     if (storage.ornFrames && frameMatch(n)) { countOrn("frame:" + n); return wrapperFor("frame", type); }
     return null;
   }
@@ -1051,7 +1052,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v26)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v27)");
     } catch (e) {}
   }
 
@@ -1117,7 +1118,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v26 debug" +
+    var report = "system24 mobile v27 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
@@ -1178,7 +1179,7 @@
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
         input("frameTargets", "Also frame these components (regex)", "^Card$"),
         sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
-        sw("ornScales", "Dragon-scale texture", "Faint scales behind the channel list."),
+        sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
         input("scaleOpacity", "Scale texture strength (0 to 1)", "0.8")
       ),
       e(FormSection, { title: "Extras" },
