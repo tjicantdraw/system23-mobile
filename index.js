@@ -11,7 +11,7 @@
   var StyleSheet = RN.StyleSheet;
   var storage = vendetta.plugin.storage;
 
-  var VERSION = 29;
+  var VERSION = 30;
   // v4: hiding back ON (wrapper protection fixed the crashes). Font now comes from the
   // Kettu font pack; the plugin's own font override is an optional fallback.
   var DEFAULTS = {
@@ -36,7 +36,7 @@
     acctBanner: true,
     bannerHeight: "64",
     chatBg: true,
-    chatBgOpacity: "0.22",
+    chatBgOpacity: "0.5",
     chatBgTargets: "^MessagesConnected$",
     frameExclude: "Button|Pill|Badge|Chip|Reaction|Toast|Tooltip|Avatar|Icon|Input|Search|Tab|Emoji|Sticker|Status|Typing",
     sectionIcons: true,
@@ -703,7 +703,7 @@
             e(View, { key: "chatbg", pointerEvents: "none",
               style: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: chatColor || "#151518" } }),
             decoImg({ key: "phoenix", source: { uri: ASSET + "phoenix.png" }, resizeMode: "contain", pointerEvents: "none",
-              style: { position: "absolute", top: 24, left: 16, right: 16, bottom: 24, opacity: isNaN(op) ? 0.22 : op } }),
+              style: { position: "absolute", top: 24, left: 16, right: 16, bottom: 24, opacity: isNaN(op) ? 0.5 : op } }),
             inner);
         });
       });
@@ -1093,7 +1093,7 @@
 
     try {
       var toasts = vendetta.ui && vendetta.ui.toasts;
-      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v29)");
+      if (toasts) toasts.showToast(failures.length ? "system24: loaded with " + failures.length + " issue(s), see settings" : "Obsidian theme loaded (v30)");
     } catch (e) {}
   }
 
@@ -1159,7 +1159,7 @@
     var colorList = Object.keys(colorSeen).slice(0, 60).map(function (c) { return c + (colorSeen[c] !== c ? "->" + colorSeen[c] : ""); });
     var iconList = Object.keys(iconProps).map(function (n) { return n + " {" + iconProps[n] + "}"; });
     var ornList = Object.keys(ornCount).map(function (k) { return k + " x" + ornCount[k]; });
-    var report = "system24 mobile v29 debug" +
+    var report = "system24 mobile v30 debug" +
       "\n\nAssets: " + (ASSET || "none") +
       "\nOrnaments: " + (ornList.join(", ") || "none yet") +
       "\nLabelled with your name: " + (Object.keys(meHits).join(" | ") || "none yet") +
@@ -1222,7 +1222,7 @@
         input("frameExclude", "Never frame (regex)", "Button|Pill|Badge|..."),
         input("frameTargets", "Also frame these components (regex)", "^Card$"),
         sw("chatBg", "Phoenix chat background", "The phoenix behind your messages (not the channel list)."),
-        input("chatBgOpacity", "Phoenix strength (0 to 1)", "0.22"),
+        input("chatBgOpacity", "Phoenix strength (0 to 1)", "0.5"),
         input("chatBgTargets", "Chat view component (regex)", "^MessagesConnected$"),
         sw("ornStars", "Category stars", "Compass star and serif capitals on category headers."),
         sw("ornScales", "Dragon-scale texture", "Faint scales behind lists."),
